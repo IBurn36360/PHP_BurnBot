@@ -1,8 +1,15 @@
 <?php
+// Was this accessed directly?  If so, exit.
+if (!defined('IN_IRC'))
+{
+	exit;
+}
+
 // defines all Burnbot logic
 class burnbot
 {
     var $version = '.5';
+    var $tickLimiter = 100000; // This sets the time each cycle is expected to take.  Will be used in the sleep calculation
     
     // Arrays (Large storage)
     var $loadedCommands = array();
@@ -14,6 +21,17 @@ class burnbot
     var $limitSends = false;
     var $messageTTL = array();
     
+    /** Registers commands from modules into the main array for checking.  Commands will have the following structure:
+     * 
+     * array(
+     *   'trigger' => '!test',                  // Sets the trigger to the command
+     *   'allowed_modes' => '+o',               // Sets the defined flags that are allowed to use the command
+     *   'regulars_allowed' => false,           // Are defined regulars allowed to use the command?
+     *   'subs_allowed' => false,               // Are subscribers on Twitch allowed to use the command?
+     *   'output' => 'This is a test command!', // The actual command output
+     *   'twitch_caster' => true                // Sets the command to work for the caster despite any of the other restrictions (Will default true)
+     * );
+     */
     public static function registerCommads($commands = array())
     {
         $this->loadedCommands = array_merge($this->loadedCommands, $commands);

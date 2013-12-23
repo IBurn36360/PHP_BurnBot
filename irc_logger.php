@@ -1,4 +1,10 @@
 <?php
+// Was this accessed directly?  If so, exit.
+if (!defined('IN_IRC'))
+{
+	exit;
+}
+
 // This extends the irc to use a logger function
 class irc_logger extends irc
 {

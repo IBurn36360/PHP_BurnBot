@@ -90,8 +90,11 @@ require('./db.php');
 $db = new db;
 $irc->_log_action($file, 'Database module loaded');
 
-// Init our Start db transactions
+// Set our DB link
+$db->sql_connect($sqlHost, $sqlUser, $sqlPass, $sqlDB, $sqlPort, true, true);
 
+// unset the password since we won't need it anymore
+unset($sqlPass);
 
 // Startup
 $irc->_log_action($file, "Creating socket connection for [$host:$port]");

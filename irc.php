@@ -1,4 +1,10 @@
 <?php
+// Was this accessed directly?  If so, exit.
+if (!defined('IN_IRC'))
+{
+	exit;
+}
+
 class irc
 {
     public static function connect($ircAddr, $ircPort)
@@ -74,9 +80,10 @@ class irc
             $hostnames = explode('!~', $split[0]);
             $username = trim($hostnames[0], ':');
             $hostname = rtrim($hostnames[1], ' ');
-            $splits = explode(' :', $split[1]);
+            $splits = explode(' ', trim(' ', $split[1])); // Do this to split out the channel name
             $chan = trim($splits[0], ' ');
-            $words = $splits[1];
+            array_shift($splits);
+            $words = implode(' ', $splits); // implode to get the message string back (Fix for people being able to use ' :' as a way of avoiding the check)
             
             // Build the message array
             $messageArr = array(
