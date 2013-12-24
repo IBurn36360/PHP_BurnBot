@@ -102,6 +102,22 @@ class irc_logger extends irc
         
         $logTime = date('m-d-y~H:i:s', time());
         @fwrite($h, "\n[ACTION]$logTime || $str");
+        @fclose($h);
+    }
+    
+    public static function _log_error($file, $str)
+    {
+        // does our log file exist?
+        if (!file_exists($file))
+        {
+            $h = @fopen($file, 'w');
+            @fwrite($h, '<?php exit; ?>');
+        } else {
+            $h = @fopen($file, 'a');
+        }
+        
+        $logTime = date('m-d-y~H:i:s', time());
+        @fwrite($h, "\n[ERROR]$logTime || $str");
         @fclose($h);        
     }
 }

@@ -6,7 +6,7 @@ if (!defined('IN_IRC'))
 }
 
 // This is basically a very stripped down version of phpBB's DBAL (DataBase Abstraction Layer)
-// All of the cache information and processes are cone and multi-database compatability is gone
+// All of the cache information and processes are gone and multi-database compatability is gone
 // The way this is coded, you can plug this direction into phpBB's DBAL with no issues for compatability with ANY SQL DB type
 class db
 {
@@ -107,7 +107,7 @@ class db
 		return @mysql_real_escape_string($msg, $this->db_connect_id);
 	}
     
-    private static function _sql_error()
+    private static function sql_error()
 	{
 		if (!$this->db_connect_id)
 		{
@@ -123,7 +123,7 @@ class db
 		);
 	}
     
-    public static function _sql_close()
+    public static function sql_close()
 	{
 		return @mysql_close($this->db_connect_id);
 	}
