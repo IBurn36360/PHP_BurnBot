@@ -11,9 +11,6 @@ session_destroy();
 require('./constants.php');
 require('./config.php');
 
-//$code = 't9r3ftg2zwrry1t1w3uivy3a8rxjiei'; // IBurn36360
-//$code = 'nzuexp0ztr4s7i9z6246m8ncqc9ef6p'; // IBot36360
-
 // Check all of these
 $host = (isset($_GET['host'])) ? $_GET['host'] : null;
 $chan = (isset($_GET['chan'])) ? $_GET['chan'] : null;
