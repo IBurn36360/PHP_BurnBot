@@ -18,7 +18,7 @@ class db
 	var $server = '';
 	var $dbname = '';
     
-    public static function sql_connect($sqlserver, $sqluser, $sqlpassword, $database, $port = false, $persistency = false, $new_link = false)
+    public function sql_connect($sqlserver, $sqluser, $sqlpassword, $database, $port = false, $persistency = false, $new_link = false)
     {
 		$this->persistency = $persistency;
 		$this->user = $sqluser;
@@ -41,7 +41,7 @@ class db
         return $this->sql_error('');
     }
     
-    public static function sql_query($query = '')
+    public function sql_query($query = '')
     {
         if ($query != '')
         {
@@ -57,12 +57,12 @@ class db
         return $this->query_result;
     }
     
-   	public static function sql_affectedrows()
+   	public function sql_affectedrows()
 	{
 		return ($this->db_connect_id) ? @mysql_affected_rows($this->db_connect_id) : false;
 	}
     
- 	public static function sql_fetchrow($query_id = false)
+ 	public function sql_fetchrow($query_id = false)
 	{
 		if ($query_id === false)
 		{
@@ -72,7 +72,7 @@ class db
 		return ($query_id !== false) ? @mysql_fetch_assoc($query_id) : false;
 	}
     
-	public static function sql_rowseek($rownum, &$query_id)
+	public function sql_rowseek($rownum, &$query_id)
 	{
 		if ($query_id === false)
 		{
@@ -82,12 +82,12 @@ class db
 		return ($query_id !== false) ? @mysql_data_seek($query_id, $rownum) : false;
 	}
     
-    public static function sql_nextid()
+    public function sql_nextid()
 	{
 		return ($this->db_connect_id) ? @mysql_insert_id($this->db_connect_id) : false;
 	}
     
-    public static function sql_freeresult($query_id = false)
+    public function sql_freeresult($query_id = false)
 	{
 		if ($query_id === false)
 		{
@@ -97,7 +97,7 @@ class db
 		return ($query_id !== false) ? @mysql_free_result($query_id) : false ;
 	}
     
-    public static function sql_escape($msg)
+    public function sql_escape($msg)
 	{
 		if (!$this->db_connect_id)
 		{
@@ -107,7 +107,7 @@ class db
 		return @mysql_real_escape_string($msg, $this->db_connect_id);
 	}
     
-    private static function sql_error()
+    private function sql_error()
 	{
 		if (!$this->db_connect_id)
 		{
@@ -123,7 +123,7 @@ class db
 		);
 	}
     
-    public static function sql_close()
+    public function sql_close()
 	{
 		return @mysql_close($this->db_connect_id);
 	}

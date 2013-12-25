@@ -19,6 +19,8 @@ $pass = (isset($_GET['pass'])) ? $_GET['pass'] : null;
 $persist = (isset($_GET['persist'])) ? $_GET['persist'] : false; // reconnect when a DC happens
 $port = (isset($_GET['port'])) ? $_GET['port'] : 6667;
 
+$connected = false;
+
 // Did we get everything we needed?
 if (($host == null) || ($chan == null) || ($nick == null))
 {
@@ -41,53 +43,53 @@ echo "Passing to log handlers on file $file.";
 require('./irc.php');
 require('./irc_logger.php');
 $irc = new irc_logger;
-$irc->_log_action($file, 'IRC module loaded');
+$irc->_log_action('IRC module loaded');
 
 // Now all of our logic from the actual bot file itself
 require('./burnbot.php');
 $burnBot = new burnbot;
-$irc->_log_action($file, 'Burnbot module loaded');
+$irc->_log_action('Burnbot module loaded');
 
 // Load ticking actions (messages that appear on a timer)
 require('./reminder.php');
 $reminders = new reminder;
-$irc->_log_action($file, 'Reminders module loaded');
+$irc->_log_action('Reminders module loaded');
 
 // Twitch integration (generating passwords)
 require('./twitch.php');
 require('./twitch_irc.php');
 $twitch = new twitch_irc;
-$irc->_log_action($file, 'Twitch module loaded');
+$irc->_log_action('Twitch module loaded');
 
 // Moderation logic
 require('./moderation.php');
 $moderation = new moderation;
-$irc->_log_action($file, 'Chat moderation module loaded');
+$irc->_log_action('Chat moderation module loaded');
 
 // Currency module
 require('./currency.php');
 $currency = new currency;
-$irc->_log_action($file, 'Currency module loaded');
+$irc->_log_action('Currency module loaded');
 
 // Rainwave Module
 require('./rainwave.php');
 $rainwave = new rainwave;
-$irc->_log_action($file, 'Rainwave module loaded');
+$irc->_log_action('Rainwave module loaded');
 
 // Last.Fm Module
 require('./lastfm.php');
 $lastFm = new lastFm;
-$irc->_log_action($file, 'Last.Fm module loaded');
+$irc->_log_action('Last.Fm module loaded');
 
 // Spotify Module
 require('./spotify.php');
 $spotify = new spotify;
-$irc->_log_action($file, 'Spotify module loaded');
+$irc->_log_action('Spotify module loaded');
 
 // Include our DB module
 require('./db.php');
 $db = new db;
-$irc->_log_action($file, 'Database module loaded');
+$irc->_log_action('Database module loaded');
 
 // Set our DB link
 $db->sql_connect($sqlHost, $sqlUser, $sqlPass, $sqlDB, $sqlPort, true, true);
@@ -96,22 +98,48 @@ $db->sql_connect($sqlHost, $sqlUser, $sqlPass, $sqlDB, $sqlPort, true, true);
 unset($sqlPass);
 
 // Startup
-$irc->_log_action($file, "Creating socket connection for [$host:$port]");
+$irc->_log_action("Creating socket connection for [$host:$port]");
 $socket = $irc->connect($host, $port);
+
+// TEMP code, kills the socket
+/*
 if (is_resource($socket))
 {
     // Set our socket blocking
-    $irc->_log_action($file, 'Socket created successfully');
+    $irc->_log_action('Socket created successfully');
     $irc->setBlocking($socket);
-    $irc->_log_action($file, 'Socket unblocked and ready for reads');
-    $irc->disconnect($socket);
-} else {
-    $irc->_log_action($file, 'Socket creation failed');
+    $irc->_log_action('Socket unblocked and ready for reads');
     $irc->disconnect($socket);
     exit;
-}
+} else {
+    $irc->_log_action('Socket creation failed');
+    $irc->disconnect($socket);
+    exit;
+}*/
+
+$burnBot->init();
 
 // Start reading
+function primaryLoop()
+{
+    while ($burnBot->getSock() > 0)
+    {
+        $burnBot->tick();
+    }
+}
 
+if ($burnBot->reconnect)
+{
+    // We will only connect 5 times to a channel.  In the future, we will use DB and a controller process to start new bot sessions
+    for ($i = 1; $i < $burnBot->getCounter(); $i++)
+    {
+        $connected = $burnBot->reconnect();
+        
+        if ($connected)
+        {
+            primaryLoop();
+        }
+    }
+}
 
 ?>

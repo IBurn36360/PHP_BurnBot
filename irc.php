@@ -7,54 +7,54 @@ if (!defined('IN_IRC'))
 
 class irc
 {
-    public static function connect($ircAddr, $ircPort)
+    public function connect($ircAddr, $ircPort)
     {
         // Simply open a new socket.  nothing new with that at all
         return fsockopen($ircAddr, $ircPort);
     }
     
-    public static function read($socket, $len = 4096)
+    public function read($socket, $len = 4096)
     {
     	$read = fgets($socket, $len);
     	$read = rtrim($read);
     	return $read;
     }
     
-    public static function write($socket, $cmd)
+    public function write($socket, $cmd)
     {
         // Simply write data to the socket
         return @fputs($socket, $cmd . "\r\n");
     }
     
-    public static function disconnect($socket)
+    public function disconnect($socket)
     {
         return @fclose($socket);
     }
     
-    public static function setBlocking($socket)
+    public function setBlocking($socket)
     {
         return socket_set_blocking($socket, false);
     }
     
     // Sends a channel message
-    public static function sendPrivateMessage($socket, $message, $chan)
+    public function sendPrivateMessage($socket, $message, $chan)
     {
         return $this->write($socket, "PRIVMSG $chan $message");
     }
     
     // Sends a /me style command
-    public static function sendAction($socket, $action, $chan)
+    public function sendAction($socket, $action, $chan)
     {
         $chr = chr(1);
         return $this->write($socket, "PRIVMSG $chan $chr$action$chr");
     }
     
-    public static function joinChannel($socket, $chan)
+    public function joinChannel($socket, $chan)
     {
         return $this->write($socket, "JOIN $chan");
     }
     
-    public static function setMode($socket, $chan, $mode, $user = null)
+    public function setMode($socket, $chan, $mode, $user = null)
     {
         if ($user != null)
         {
@@ -65,7 +65,7 @@ class irc
     }
     
     // Takes a raw string from the socket and determines all of the data it can about the string
-    public static function checkRawMessage($message)
+    public function checkRawMessage($message)
     {
         $type = 'system';
         $messageArr = array();

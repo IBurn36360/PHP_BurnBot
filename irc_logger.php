@@ -8,15 +8,19 @@ if (!defined('IN_IRC'))
 // This extends the irc to use a logger function
 class irc_logger extends irc
 {
-    public static function _write($socket, $cmd, $file)
+    public function _write($socket, $cmd)
     {
+        global $file;
+        
         // Simply write data to the socket
         $this->_log_outgoing($file, $cmd);
         return $this->write($socket, $cmd);
     }
     
-    public static function _read($socket, $file, $len = 4096)
+    public function _read($socket, $len = 4096)
     {
+        global $file;
+        
     	$read = fgets($socket, $len);
     	$read = rtrim($read);
         $this->_log_incoming($file, $read);
@@ -24,29 +28,36 @@ class irc_logger extends irc
     }
     
     // Sends a channel message
-    public static function _sendPrivateMessage($socket, $message, $chan, $file)
+    public function _sendPrivateMessage($socket, $message, $chan)
     {
+        global $file;
+        
         $this->_log_outgoing($file, "PRIVMSG $chan $message");
         return $this->write($socket, "PRIVMSG $chan $message");
     }
     
     // Sends a /me style command
-    public static function _sendAction($socket, $action, $chan, $file)
+    public function _sendAction($socket, $action, $chan)
     {
+        global $file;
         $chr = chr(1);
         
         $this->_log_outgoing($file, "PRIVMSG $chan $chr$action$chr");
         return $this->write($socket, "PRIVMSG $chan $chr$action$chr");
     }
     
-    public static function _joinChannel($socket, $chan, $file)
+    public function _joinChannel($socket, $chan)
     {
+        global $file;
+        
         $this->_log_outgoing($file, "JOIN $chan");
         return $this->write($socket, "JOIN $chan");
     }
     
-    public static function _setMode($socket, $chan, $mode, $file, $user = null)
+    public function _setMode($socket, $chan, $mode, $user = null)
     {
+        global $file;
+        
         if ($user != null)
         {
             $this->_log_outgoing($file, "MODE $chan $mode $user");
@@ -57,8 +68,10 @@ class irc_logger extends irc
         }
     }
     
-    public static function _log_incoming($file, $str)
+    public function _log_incoming($str)
     {
+        global $file;
+        
         // does our log file exist?
         if (!file_exists($file))
         {
@@ -73,8 +86,10 @@ class irc_logger extends irc
         @fclose($h);
     }
     
-    public static function _log_outgoing($file, $str)
+    public function _log_outgoing($str)
     {
+        global $file;
+        
         // does our log file exist?
         if (!file_exists($file))
         {
@@ -89,8 +104,10 @@ class irc_logger extends irc
         @fclose($h);
     }
     
-    public static function _log_action($file, $str)
+    public function _log_action($str)
     {
+        global $file;
+        
         // does our log file exist?
         if (!file_exists($file))
         {
@@ -105,8 +122,10 @@ class irc_logger extends irc
         @fclose($h);
     }
     
-    public static function _log_error($file, $str)
+    public function _log_error($str)
     {
+        global $file;
+        
         // does our log file exist?
         if (!file_exists($file))
         {
