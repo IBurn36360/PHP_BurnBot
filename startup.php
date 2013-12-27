@@ -2,6 +2,12 @@
 
 echo 'Starting startup<hr />';
 
+// Set execution time
+if (ini_get('max_execution_time') != 0)
+{
+    ini_set('max_execution_time', '0');
+}
+
 // Set the session
 session_start();
 $_SESSION = array();
@@ -36,6 +42,11 @@ if (($host == null) || ($chan == null) || ($nick == null))
 
 // Set the file name we will be using for logging (TEMP...WILL BE BETTER LATER WHEN LISTENERS ADDED)
 $file = "./logs/$host $chan.php";
+
+if (file_exists($file))
+{
+    unlink($file);
+}
 
 echo "Passing to log handlers on file $file.";
 
@@ -97,36 +108,30 @@ $db->sql_connect($sqlHost, $sqlUser, $sqlPass, $sqlDB, $sqlPort, true, true);
 // unset the password since we won't need it anymore
 unset($sqlPass);
 
+$sql = 'DELETE FROM ' . BURNBOT_COMMANDS . ' WHERE id=\'0\'';
+$result = $db->sql_query($sql);
+
 // Startup
 $irc->_log_action("Creating socket connection for [$host:$port]");
 $socket = $irc->connect($host, $port);
-
-// TEMP code, kills the socket
-/*
-if (is_resource($socket))
-{
-    // Set our socket blocking
-    $irc->_log_action('Socket created successfully');
-    $irc->setBlocking($socket);
-    $irc->_log_action('Socket unblocked and ready for reads');
-    $irc->disconnect($socket);
-    exit;
-} else {
-    $irc->_log_action('Socket creation failed');
-    $irc->disconnect($socket);
-    exit;
-}*/
+$irc->setBlocking($socket);
 
 $burnBot->init();
 
 // Start reading
 function primaryLoop()
 {
-    while ($burnBot->getSock() > 0)
+    global $burnBot, $irc, $socket;
+    
+    while ($socket > 0)
     {
         $burnBot->tick();
     }
+    
+    $irc->_log_error("Socket was closed");
 }
+
+primaryLoop();
 
 if ($burnBot->reconnect)
 {
@@ -141,5 +146,4 @@ if ($burnBot->reconnect)
         }
     }
 }
-
 ?>

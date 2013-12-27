@@ -39,7 +39,7 @@ class irc
     // Sends a channel message
     public function sendPrivateMessage($socket, $message, $chan)
     {
-        return $this->write($socket, "PRIVMSG $chan $message");
+        return $this->write($socket, "PRIVMSG $chan :$message");
     }
     
     // Sends a /me style command
@@ -76,14 +76,25 @@ class irc
             $type = 'private';
             
             // Split the message into hostname and message
-            $split = explode('PRIVMSG', $message);
-            $hostnames = explode('!~', $split[0]);
+            $split = explode(' PRIVMSG ', $message);
+            $hostnames = explode('!', $split[0]);
             $username = trim($hostnames[0], ':');
-            $hostname = rtrim($hostnames[1], ' ');
-            $splits = explode(' ', trim(' ', $split[1])); // Do this to split out the channel name
+            if (isset($hostnames[1]))
+            {
+                $hostname = rtrim($hostnames[1], ' ');
+            } else {
+                return array();
+            }
+            $hostname = trim($hostname, '~');
+            if (isset($split[1]))
+            {
+                $splits = explode(' ', $split[1]); // Do this to split out the channel name
+            } else {
+                return array();
+            }
             $chan = trim($splits[0], ' ');
             array_shift($splits);
-            $words = implode(' ', $splits); // implode to get the message string back (Fix for people being able to use ' :' as a way of avoiding the check)
+            $words = trim(implode(' ', $splits), ':'); // implode to get the message string back (Fix for people being able to use ' :' as a way of avoiding the check)
             
             // Build the message array
             $messageArr = array(
@@ -93,15 +104,16 @@ class irc
                 'chan' => $chan,
                 'message' => $words
             );
+            
+            return $messageArr;
         } else {
             // We have a system message.
             $split = explode(' ', $message);
             $type = 'system';
             
-            // Do we have a 3 digit number for our second set?
-            if (preg_match('([0-9]{3,3})', $split[1]) != 0)
+            // Do we have a 3 digit number for our second set?  The second check stops PING with a lag timer from tripping this
+            if ((preg_match('([0-9]{3,3})', $split[1]) != 0) && (preg_match('[ping]i', $split[0]) == 0))
             {
-                
                 // Looks like we do, time to get the rest of the data
                 $hostname = trim($split[0], ':');
                 $serviceID = $split[1];
@@ -143,7 +155,6 @@ class irc
                     case '331': // No topic
                     case '332': // Channel Topic
                     case '333': // Channel Auth Nick
-                    case '353': // Channel WHO (Join)
                     case '366': // End WHO
                         
                         // Set all of the data for this type of message
@@ -162,10 +173,46 @@ class irc
                         );
                         
                         break;
+                        
+                    case '353': // Channel WHO (Join)
+                    
+                         // Set all of the data for this type of message
+                        $nick = $split[2];
+                        $chan = $split[4];
+                        array_shift($split);array_shift($split);array_shift($split);array_shift($split);array_shift($split);
+                        $words = trim(implode(' ', $split), ':');
+                        
+                        // Build the array
+                        $messageArr = array(
+                            'type' => $type,
+                            'nick' => $nick,
+                            'host' => $hostname,
+                            'chan' => $chan,
+                            'service_id' => $serviceID,
+                            'message' => $words
+                        );                
+                    
+                        break;
+                        
+                    case '221': // Default user mode (Used to trigger channel JOIN)
+                        
+                        // Build the array
+                    
+                        $messageArr = array(
+                            'type' => $type,
+                            'nick' => $split[2],
+                            'host' => $hostname,
+                            'mode' => $split[3],
+                            'service_id' => $serviceID
+                        );
+                    
+                        break;
                     
                     default: // We don't know this service ID.  It may be put in in a future update
                         break;
                 }
+                
+                return $messageArr;
             } else {
                 // We have no service ID.  Time to look for a command
                 
@@ -175,14 +222,33 @@ class irc
                     // Set our values that need to be modified
                     $chan = $split[2];
                     $mode = $split[3];
-                    $user = $split[4];
+                    if (isset($split[4]))
+                    {
+                        $user = $split[4];
+                    }
                     
-                    $messageArr = array(
-                        'type' => $type,
-                        'chan' => $chan,
-                        'mode' => $mode,
-                        'user' => $user
-                    );
+                    
+                    if (isset($user))
+                    {
+                        // Standard MODE message, proceed as normal
+                        $messageArr = array(
+                            'type' => $type,
+                            'chan' => $chan,
+                            'mode' => $mode,
+                            'user' => $user
+                        );                        
+                    } else {
+                        // This is a case where the mode is our default.  It doesn't have a service ID attached, so we will build the array differently here for the bot to recognize it properly
+                        $messageArr = array(
+                            'type' => $type,
+                            'service_id' => '221',
+                            'nick' => $chan,
+                            'mode' => $mode
+                        );
+                    }
+
+                    
+                    return $messageArr;
                 }
                 
                 // PING
@@ -206,10 +272,12 @@ class irc
                             'message' => $explode[1]
                         );
                     }
+                    
+                    return $messageArr;
                 }
                 
-                // AUTH
-                if (preg_match('[auth]i', $message) != 0)
+                // AUTH (No-NickServ)
+                if ((preg_match('[NOTICE AUTH]i', $message) != 0))
                 {
                     $explode = explode(':', $message);
                     
@@ -218,6 +286,22 @@ class irc
                         'isAuth' => true,
                         'message' => $explode[1]
                     );
+                    
+                    return $messageArr;
+                }
+                
+                // AUTH (NickServ)
+                if (preg_match('[NOTICE * ]i', $message) != 0)
+                {
+                    $explode = explode(':', $message);
+                    
+                    $messageArr = array(
+                        'type' => $type,
+                        'isAuth' => true,
+                        'message' => $explode[2]
+                    );
+                    
+                    return $messageArr;
                 }
             }
         }

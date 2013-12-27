@@ -109,23 +109,82 @@ class db
     
     private function sql_error()
 	{
+	   global $irc;
+       
 		if (!$this->db_connect_id)
 		{
-			return array(
-				'message'	=> @mysql_error(),
-				'code'		=> @mysql_errno()
-			);
+            $irc->_log_error(@mysql_error() . ':' . @mysql_errno());
+            return;
 		}
 
-		return array(
-			'message'	=> @mysql_error($this->db_connect_id),
-			'code'		=> @mysql_errno($this->db_connect_id)
-		);
+        $irc->_log_error(@mysql_error($this->db_connect_id) . ':' . @mysql_errno($this->db_connect_id));
+        return;
 	}
     
     public function sql_close()
 	{
 		return @mysql_close($this->db_connect_id);
+	}
+    
+    public function sql_build_insert($table, $sql_ary)
+    {
+        $ary = array();
+		foreach ($sql_ary as $id => $value)
+		{
+            $ary[] = $this->sql_validate_value($value);
+		}
+
+		return 'INSERT INTO ' . $table . ' ' . ' (' . implode(',', array_keys($sql_ary)) . ') VALUES (' . implode(',', $ary) . ');';
+    }			
+
+    
+    public function sql_build_update($table, $insert, $conditions = array())
+    {
+        // Start by breaking down the array of parameters
+        $set = '';
+        $condition = '';
+        
+        foreach ($insert as $collumn => $value)
+        {
+            $set .= "$collumn='$value',";
+        }
+        
+        $set = rtrim($set, ',');
+        
+        if (!empty($conditions))
+        {
+            foreach ($conditions as $collumn => $value)
+            {
+                // Cheap way of getting the AND in there
+                if ($condition != '')
+                {
+                    $condition .= ' AND ';
+                }
+                
+                $condition .= "$collumn='$value'";
+            }
+        }
+        
+        // Build the query and return it
+        $sql = ($condition != '') ? "UPDATE $table SET $set WHERE $condition;" : "UPDATE $table SET $set;";
+        
+        return $sql;
+    }
+    
+	function sql_validate_value($var)
+	{
+		if (is_null($var))
+		{
+			return 'NULL';
+		}
+		else if (is_string($var))
+		{
+			return "'" . $this->sql_escape($var) . "'";
+		}
+		else
+		{
+			return (is_bool($var)) ? intval($var) : $var;
+		}
 	}
 }
 ?>
