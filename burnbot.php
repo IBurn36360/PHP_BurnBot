@@ -255,15 +255,9 @@ class burnbot
         
         if (is_array($arr) && !empty($arr))
         {
-            // Convert to bool for our checks
-            if (!isset($row['ops_only']) || !isset($row['regulars_only']) || !isset($row['subs_only']))
-            {
-                // Only happens if no commands were returned
-                return;
-            }
-            $row['ops_only'] = ($row['ops_only'] == 1) ? true : false;
-            $row['regulars_only'] = ($row['regulars_only'] == 1) ? true : false;
-            $row['subs_only'] = ($row['subs_only'] == 1) ? true : false;
+            $row['ops_only'] = (isset($row['ops_only']) && ($row['ops_only'] == 1)) ? true : false;
+            $row['regulars_only'] = (isset($row['regulars_only']) && $row['regulars_only'] == 1) ? true : false;
+            $row['subs_only'] = (isset($row['subs_only']) && $row['subs_only'] == 1) ? true : false;
             
             foreach ($arr as $row)
             {
