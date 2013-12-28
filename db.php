@@ -13,10 +13,15 @@ class db
 	var $db_connect_id;
 	var $query_result;
     
-	var $persistency = false;
+	var $persistency = true;
 	var $user = '';
 	var $server = '';
 	var $dbname = '';
+    var $dbport = '';
+    var $newlink = true;
+    
+    // Since we are going to reconnect, we need to know this.  Store as a private var
+    private $dbpass = '';
     
     public function sql_connect($sqlserver, $sqluser, $sqlpassword, $database, $port = false, $persistency = false, $new_link = false)
     {
@@ -24,6 +29,8 @@ class db
 		$this->user = $sqluser;
 		$this->server = $sqlserver . (($port) ? ':' . $port : '');
 		$this->dbname = $database;
+        $this->dbport = ($port) ? $port : false;
+        $this->newLink = $new_link;
         
         $this->db_connect_id = ($this->persistency) ? @mysql_pconnect($this->server, $this->user, $sqlpassword) : @mysql_connect($this->server, $this->user, $sqlpassword, $new_link);
         
@@ -41,8 +48,20 @@ class db
         return $this->sql_error('');
     }
     
+    private function connected()
+    {
+        return mysql_ping($this->db_connect_id);
+    }
+    
     public function sql_query($query = '')
     {
+        // Do we have a connection to the DB right now?
+        if (!$this->connected())
+        {
+            // Reconnect here
+            $this->sql_connect($this->server, $this->user, $this->dbpass, $this->dbname, $this->dbport, $this->persistency, $this->newlink);
+        }
+        
         if ($query != '')
         {
             // Okay, perform the query and store it in query_result
@@ -70,6 +89,27 @@ class db
 		}
 
 		return ($query_id !== false) ? @mysql_fetch_assoc($query_id) : false;
+	}
+    
+	public function sql_fetchrowset($query_id = false)
+	{
+		if ($query_id === false)
+		{
+			$query_id = $this->query_result;
+		}
+
+		if ($query_id !== false)
+		{
+			$result = array();
+			while ($row = $this->sql_fetchrow($query_id))
+			{
+				$result[] = $row;
+			}
+
+			return $result;
+		}
+
+		return false;
 	}
     
 	public function sql_rowseek($rownum, &$query_id)
@@ -146,7 +186,7 @@ class db
         
         foreach ($insert as $collumn => $value)
         {
-            $set .= "$collumn='$value',";
+            $set .= $this->sql_escape($collumn) . "='" . $this->sql_escape($value) . "',";
         }
         
         $set = rtrim($set, ',');
@@ -161,12 +201,12 @@ class db
                     $condition .= ' AND ';
                 }
                 
-                $condition .= "$collumn='$value'";
+                $condition .= $this->sql_escape($collumn) . "='" . $this->sql_escape($value) . "'";
             }
         }
         
         // Build the query and return it
-        $sql = ($condition != '') ? "UPDATE $table SET $set WHERE $condition;" : "UPDATE $table SET $set;";
+        $sql = ($condition != '') ? "UPDATE " . $this->sql_escape($table) . " SET $set WHERE $condition;" : "UPDATE " . $this->sql_escape($table) . " SET $set;";
         
         return $sql;
     }

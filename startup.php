@@ -103,7 +103,7 @@ $db = new db;
 $irc->_log_action('Database module loaded');
 
 // Set our DB link
-$db->sql_connect($sqlHost, $sqlUser, $sqlPass, $sqlDB, $sqlPort, true, true);
+$db->sql_connect($sqlHost, $sqlUser, $sqlPass, $sqlDB, $sqlPort, false, true);
 
 // unset the password since we won't need it anymore
 unset($sqlPass);
