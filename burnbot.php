@@ -63,7 +63,8 @@ class burnbot
         'editcom' => array('burnbot', 'burnbot_editcom', true, false, false),
         'quit'    => array('burnbot', 'burnbot_quit', true, false, false),
         'addreg'  => array('burnbot', 'burnbot_addreg', true, false, false),
-        'delreg'  => array('burnbot', 'burnbot_delreg', true, false, false)
+        'delreg'  => array('burnbot', 'burnbot_delreg', true, false, false),
+        'memusage'=> array('burnbot', 'burnbot_memusage', true, false, false)
     );
     
     /**
@@ -75,7 +76,7 @@ class burnbot
     // Limits message sends
     var $limitSends = true; // Override this later if we don't want the limiter enabled
     var $messageTTL = array();
-    var $TTL = 30; // The number of seconds that a message is kept alive for
+    var $TTL = 31; // The number of seconds that a message is kept alive for (31 seconds to allow for the message to die on our peers end as well)
     var $TTLStack = 20; // The limit of messages in the stack
     
     function __construct()
@@ -211,6 +212,47 @@ class burnbot
     public function registerModule($module = array())
     {
         $this->loadedModules = array_merge($this->loadedModules, $module);
+    }
+    
+    // This is here for VERY specific commands only
+    public function unregisterCommands($command = '', $commands = array())
+    {
+        if (($command != '') && array_key_exists($command, $this->loadedCommands))
+        {
+            unset($this->loadedCommands[$command]);
+            return true;
+        }
+        
+        // We can also unset a list of commands in the case we are unregistering a module
+        if (($commands != array()) && is_array($commands))
+        {
+            foreach ($commands as $command)
+            {
+                if (($command != '') && array_key_exists($command, $this->loadedCommands))
+                {
+                    unset($this->loadedCommands[$command]);
+                }
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+    
+    public function unregisterModule($module = '')
+    {
+        if ($module == '')
+        {
+            //people weren't smart
+            return false;
+        }
+    }
+    
+    // Resets all commands to the same state they were on load
+    public function reloadhCommands()
+    {
+        
     }
 
     public function auth()
@@ -531,14 +573,12 @@ class burnbot
     }
     
     // Reads the message we recieved and adds any message triggers we need to.  Also triggers a command to be added
-    /**
-     * @todo Complete all read checks for the cycle
-     */
-    public function _read()
+    public function _read($message = null)
     {
         global $irc, $socket, $chan, $reminders, $twitch, $moderation, $currency, $rainwave, $lastFm, $spotify;
         
-        $message = $irc->_read($socket);
+        // Was the function already supplied a message?  If so, we were ina  loop of limitless reads
+        $message = ($message != null) ? $message : $irc->_read($socket);
         if (strlen($message) <= 0)
         {
             return;
@@ -601,11 +641,25 @@ class burnbot
                         // Remove a regular
                         if ($messageArr['mode'] == '-v')
                         {
-                             unset($this->regulars[$messageArr['user']]);
-                             $user = $messageArr['user'];
+                            unset($this->regulars[$messageArr['user']]);
+                            $user = $messageArr['user'];
                             $irc->_log_action("Removing $user from regulars");
                         }
                     }
+                }
+                
+                if ((isset($messageArr['isJoin']) || isset($messageArr['isPart'])) && $this->isTwitch)
+                {
+                    // Twitch batches JOIN and PART messages, This means we can read through all of those without limits
+                    while (isset($messageArr['isJoin']) || isset($messageArr['isPart']))
+                    {
+                        $message = $irc->_read($socket);
+                        $messageArr = $irc->checkRawMessage($message);
+                    }
+                    
+                    // At this point, we need to make sure the last message is actually processed
+                    $this->_read($message);
+                    return; // !IMPORTANT, Stop ANY other checks in read for this check.  The recursive call to this function will handle the message.
                 }
                 
                 // We have a numbered service ID instead at this point.  We only handle a few of these and will drop the rest
@@ -689,7 +743,7 @@ class burnbot
                                 break; // We are done here, no need to continue
                             }
                         }
-                    }                    
+                    }
                 }
                 
                 return;
@@ -784,7 +838,13 @@ class burnbot
         $this->_read();
         $this->processQue();
         
-        // Okay, now check to see if we finished before the maximum time limit.
+        // Do we need to send a PING to our peer?
+        if (($this->lastPingTime + 60) > $this->tickStartTime)
+        {
+            $this->ping();
+        }
+        
+        // Okay, now check to see if we finished before the minimum time limit.
         if (($this->tickStartTime + $this->tickLimiter) > ($this->tickCurrentTime = microtime(true)))
         {
             // We were faster than the limit, sleep for the rest of the cycle
@@ -1201,6 +1261,17 @@ class burnbot
         
         $str = "Currently loaded modules:$modules";
         $this->addMessageToQue($str);
+    }
+    
+    private function burnbot_memusage($sender, $msg = '')
+    {
+        if (array_key_exists($sender, $this->operators))
+        {
+            $raw = memory_get_usage();
+            $mB = ($raw / 1024.0) / 1024.0;
+            
+            $this->addMessageToQue("Current memory usage: " . $mB . "Mb || RawBytes: $raw");
+        }
     }
     
     /**

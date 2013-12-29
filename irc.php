@@ -227,7 +227,6 @@ class irc
                         $user = $split[4];
                     }
                     
-                    
                     if (isset($user))
                     {
                         // Standard MODE message, proceed as normal
@@ -246,7 +245,62 @@ class irc
                             'mode' => $mode
                         );
                     }
+                    
+                    return $messageArr;
+                }
+                
+                if (preg_match('[join]i', $message) != 0)
+                {
+                    $hostnames = $split[0];
+                    
+                    // Split the hostnames based on what chars we find
+                    if (preg_match('[!]i', $message) != 0)
+                    {
+                        $splits = explode('!', $hostnames);
+                        $nick = trim($splits[0], ':');
+                        $hostnames = explode('@', $splits[1]);
+                        $hostname = trim($hostnames[1], '~');
+                    } else {
+                        $splits = explode('@', $hostnames);
+                        $nick = $splits[0];
+                        $hostname = $splits[0];
+                    }
+                    
+                    $messageArr = array(
+                        'type' => $type,
+                        'isJoin' => true,
+                        'nick' =>$nick,
+                        'host' =>$hostname,
+                        'chan' => $split[2]
+                    );
+                    
+                    return $messageArr;
+                }
 
+                if (preg_match('[part]i', $message) != 0)
+                {
+                    $hostnames = $split[0];
+                    
+                    // Split the hostnames based on what chars we find
+                    if (preg_match('[!]i', $message) != 0)
+                    {
+                        $splits = explode('!', $hostnames);
+                        $nick = trim($splits[0], ':');
+                        $hostnames = explode('@', $splits[1]);
+                        $hostname = trim($hostnames[1], '~');
+                    } else {
+                        $splits = explode('@', $hostnames);
+                        $nick = $splits[0];
+                        $hostname = $splits[0];
+                    }
+                    
+                    $messageArr = array(
+                        'type' => $type,
+                        'isPart' => true,
+                        'nick' =>$nick,
+                        'host' =>$hostname,
+                        'chan' => $split[2]
+                    );
                     
                     return $messageArr;
                 }
