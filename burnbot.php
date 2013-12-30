@@ -14,6 +14,7 @@ class burnbot
     var $tickStartTime = 0;
     var $tickCurrentTime = 0;
     var $lastPingTime = 0;
+    var $lastPongTime = 0;
     var $isTwitch = false;
     var $commandDelimeter = '!';
     var $reconnect = true; // Default to allow reconnecting to the server
@@ -29,6 +30,7 @@ class burnbot
     // The socket for the IRC connection
     var $sessionID = 0;
     var $hasAuthd = false;
+    var $hasJoined = false;
     
     // Arrays (Large storage)
     var $loadedCommands = array();
@@ -116,7 +118,7 @@ class burnbot
     }
     
     // Be sure to properly close the socket BEFORE the script dies for whatever reason
-    function exitHandler()
+    private function exitHandler()
     {
         global $irc, $socket;
         
@@ -125,13 +127,49 @@ class burnbot
         // Wait for the peer to get the command, if they do not disconnect us, we will close the socket forcibly
         usleep(500000);
         $irc->disconnect($socket);
+        $socket = null;
         
-        // Update our Auth in case we want to reconnect
+        // Update our Auth in case we want to reconnect from our external parent
         $this->hasAuthd = false;
+        $this->hasJoined = false;
+        
+        // Reset timers as well
+        $this->lastPingTime = 0;
+        $this->lastPongTime = 0;
         
         // Hard stop the script here since we were passed here
         echo '<hr />Script was passed to exit handler.  Now killing script entirely<hr />';
         exit;
+    }
+    
+    private function timeoutPeer()
+    {
+      global $irc, $socket;
+        
+        $irc->_write($socket, 'QUIT :Ping timeout (180 seconds)');
+        
+        usleep(500000);
+        $irc->disconnect($socket);
+        $socket = null;
+        
+        // Update our Auth in case we want to reconnect
+        $this->hasAuthd = false;
+        $this->hasJoined = false;
+        
+        // Reset timers as well
+        $this->lastPingTime = 0;
+        $this->lastPongTime = 0;
+        
+        // Reconnect to the socket
+        while ($this->reconnectCounter != 0)
+        {
+            $this->reconnect();
+        }
+        
+        if ($socket !== null)
+        {
+            $this->reconnectCounter = 5;
+        }
     }
     
     // Store the socket as a class var we can use easily
@@ -176,7 +214,7 @@ class burnbot
         $irc->_log_action('Quit Override Key: ' . $this->overrideKey);
         
         // Register modules
-        $this->registerModule(array("burnbot"));
+        $this->registerModule(array("burnbot", "user"));
         
         // Now grab the data for the channel
         $this->grabCommands();
@@ -250,7 +288,7 @@ class burnbot
     }
     
     // Resets all commands to the same state they were on load
-    public function reloadhCommands()
+    public function reloadCommands()
     {
         
     }
@@ -436,51 +474,16 @@ class burnbot
             }
         }
     }
-    
-    // Permission checks
-    public function checkRegulars($user)
-    {
-        global $irc;
-        $irc->_log_action("Checking regulars array for user $user");
-        
-        foreach($this->regulars as $username => $false)
-        {
-            if ($user == $username)
-            {
-                $irc->_log_action("User $user is regular");
-                return true;
-            }
-        }
-        
-        $irc->_log_action("User $user is not regular");
-        return false;
-    }
-    
-    public function checkOperators($user)
-    {
-        global $irc;
-        $irc->_log_action("Checking operator array for user $user");
-        
-        foreach($this->operators as $username => $false)
-        {
-            if ($user == $username)
-            {
-                $irc->_log_action("User $user is operator");
-                return true;
-            }
-        }
-        
-        $irc->_log_action("User $user is not operator");
-        return false;        
-    }
      
     // Attempts to reconnect to a socket that we seem to have lost connection to
     public function reconnect()
     {
         global $socket;
         
+        $this->reconnectCounter--;
+        
         // DO NOT TRY TO RECONNECT IF THE SOCKET IS STILL ALIVE!
-        if ($socket !== null)
+        if ($socket === null)
         {
             global $irc;
             
@@ -513,8 +516,8 @@ class burnbot
     {
         global $irc, $socket;
         
+        // Update this since we have sent a PING to our peer
         $this->lastPingTime = time();
-        
         $irc->_write($socket, "PING :LAG$this->lastPingTime");
     }
     
@@ -597,7 +600,17 @@ class burnbot
                 if (isset($messageArr['isPing']))
                 {
                     $this->pong($msg = (isset($messageArr['message']) ? $messageArr['message'] : ''));
+                    
+                    // Update this when WE recieve the message
+                    $this->lastPongTime = time();
                 }
+                
+                // PONG
+                if (isset($messageArr['isPong']))
+                {
+                    // Update this when WE recieve the message, nothing more to do here
+                    $this->lastPongTime = time();
+                }                
                 
                 // AUTH
                 if (isset($messageArr['isAuth']))
@@ -676,22 +689,34 @@ class burnbot
                         }
                         
                         // If we are on twitch, this is when we join a channel
-                        if ($this->isTwitch)
+                        if ($this->isTwitch && !$this->hasJoined)
                         {
                             $irc->_joinChannel($socket, $chan);
+                            $this->hasJoined = true;
                         }
                     }
                     
                     // We have a default mode, now we may JOIN
-                    if ($messageArr['service_id'] == '221')
+                    if (($messageArr['service_id'] == '221') && !$this->hasJoined)
                     {
                         $irc->_joinChannel($socket, $chan);
+                        $this->hasJoined = true;
                     }
                     
                     // We gained a WHO from a channel join
                     if ($messageArr['service_id'] == '353')
                     {
-                        $this->who($messageArr['message']);
+                        // This could be very large, so we are going into limitless read again
+                        while ($messageArr['service_id'] == '353')
+                        {
+                            $this->who($messageArr['message']);
+                            $message = $irc->_read($socket);
+                            $messageArr = $irc->checkRawMessage($message);
+                        }
+                        
+                        // Make sure the next message is dealt with properly
+                        $this->_read($message);
+                        return;
                     }
                 }
                 
@@ -826,8 +851,11 @@ class burnbot
     // The loop we run for the bot
     public function tick()
     {
+        global $irc;
+        
         // First get the time that this cycle started
         $this->tickStartTime = microtime(true);
+        $ping = time();
         
         // For Twitch in particular, we AUTH before anything
         if (!$this->hasAuthd && $this->isTwitch)
@@ -838,10 +866,26 @@ class burnbot
         $this->_read();
         $this->processQue();
         
-        // Do we need to send a PING to our peer?
-        if (($this->lastPingTime + 60) > $this->tickStartTime)
+        // Are we going to time our peer out at this point?
+        if ((($this->lastPongTime + 180) <= $ping) && ($this->lastPongTime !== 0))
         {
-            $this->ping();
+            // We might not have AUTH'd and JOIN'd yet, so don't disconnect in that case
+            if ($this->hasJoined)
+            {
+                // Alright, run our timeout handler
+                $this->timeoutPeer();
+            }            
+        }
+        
+        // Do we need to send a PING to our peer?
+        // Check to see if lastPing has been sent and to see if we have Auth'd
+        if ((($this->lastPingTime + 60) <= $ping) && ($this->lastPingTime !== 0))
+        {
+            // Do NOT send a PING is we havn't AUTH'd yet
+            if ($this->hasJoined)
+            {
+                $this->ping();
+            }
         }
         
         // Okay, now check to see if we finished before the minimum time limit.

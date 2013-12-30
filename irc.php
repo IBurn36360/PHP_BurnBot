@@ -249,6 +249,7 @@ class irc
                     return $messageArr;
                 }
                 
+                // JOIN
                 if (preg_match('[join]i', $message) != 0)
                 {
                     $hostnames = $split[0];
@@ -276,7 +277,8 @@ class irc
                     
                     return $messageArr;
                 }
-
+                
+                // PART
                 if (preg_match('[part]i', $message) != 0)
                 {
                     $hostnames = $split[0];
@@ -326,6 +328,19 @@ class irc
                             'message' => $explode[1]
                         );
                     }
+                    
+                    return $messageArr;
+                }
+                
+                // PONG response
+                if (preg_match('[pong]i', $message) != 0)
+                {
+                    $messageArr = array(
+                        'type' => $type,
+                        'isPong' => true,
+                        'host' => $split[0],
+                        'message' => $split[3]
+                    );
                     
                     return $messageArr;
                 }
