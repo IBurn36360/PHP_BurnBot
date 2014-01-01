@@ -8,9 +8,12 @@ if (!defined('IN_IRC'))
 // defines all Burnbot logic
 class burnbot
 {
+    var $readOnly = false; // This stops commands from being able to be registered EXCEPT quit
+    
     var $version = '.5';
     var $overrideKey = '';
-    var $tickLimiter = .1; // This sets the time each cycle is expected to take (in seconds).  Will be used in the sleep calculation
+    var $tickLimiter = .10; // This sets the time each cycle is expected to take (in seconds).  Will be used in the sleep calculation
+    var $tickLimiterPostJoin = .02; // This updates the limiter above when we finally JOIN
     var $tickStartTime = 0;
     var $tickCurrentTime = 0;
     var $lastPingTime = 0;
@@ -39,6 +42,7 @@ class burnbot
     var $operators = array();
     var $regulars = array();
     var $subscribers = array();
+    var $turboUsers = array();
     
     // Twitch hostnames and IP's (True indicates that it is active)
     var $twitchHosts = array(
@@ -50,23 +54,24 @@ class burnbot
     );
     
     var $burnbotCommands = array(
-        'contact' => array('burnbot', 'burnbot_contact', false, false, false),
-        'google'  => array('burnbot', 'burnbot_google', false, false, false),
-        'help'    => array('burnbot', 'burnbot_help', false, false, false),
-        'listcom' => array('burnbot', 'burnbot_listcom', false, false, false),
-        'listops' => array('burnbot', 'burnbot_listops', false, false, false),
-        'listreg' => array('burnbot', 'burnbot_listreg', false, false, false),
-        'modules' => array('burnbot', 'burnbot_loadedModules', false, false, false),
-        'version' => array('burnbot', 'burnbot_version', false, false, false),
-        'nick'    => array('burnbot', 'burnbot_nick', false, true, false),
-        'slap'    => array('burnbot', 'burnbot_slap', false, true, false),
-        'addcom'  => array('burnbot', 'burnbot_addcom', true, false, false),
-        'delcom'  => array('burnbot', 'burnbot_delcom', true, false, false),
-        'editcom' => array('burnbot', 'burnbot_editcom', true, false, false),
-        'quit'    => array('burnbot', 'burnbot_quit', true, false, false),
-        'addreg'  => array('burnbot', 'burnbot_addreg', true, false, false),
-        'delreg'  => array('burnbot', 'burnbot_delreg', true, false, false),
-        'memusage'=> array('burnbot', 'burnbot_memusage', true, false, false)
+        'contact' => array('core', 'burnbot_contact', false, false, false, false),
+        'google'  => array('core', 'burnbot_google', false, false, false, false),
+        'help'    => array('core', 'burnbot_help', false, false, false, false),
+        'listcom' => array('core', 'burnbot_listcom', false, false, false, false),
+        'listops' => array('core', 'burnbot_listops', false, false, false, false),
+        'listreg' => array('core', 'burnbot_listreg', false, false, false, false),
+        'modules' => array('core', 'burnbot_loadedModules', false, false, false, false),
+        'version' => array('core', 'burnbot_version', false, false, false, false),
+        'nick'    => array('core', 'burnbot_nick', false, true, false, false),
+        'slap'    => array('core', 'burnbot_slap', false, true, false, false),
+        'addcom'  => array('core', 'burnbot_addcom', true, false, false, false),
+        'delcom'  => array('core', 'burnbot_delcom', true, false, false, false),
+        'editcom' => array('core', 'burnbot_editcom', true, false, false, false),
+        'quit'    => array('core', 'burnbot_quit', true, false, false, false),
+        'addreg'  => array('core', 'burnbot_addreg', true, false, false, false),
+        'delreg'  => array('core', 'burnbot_delreg', true, false, false, false),
+        'memusage'=> array('core', 'burnbot_memusage', true, false, false, false),
+        'limiters'=> array('core', 'burnbot_limiters', true, false, false, false)
     );
     
     /**
@@ -86,7 +91,8 @@ class burnbot
         // grab our info from startup
         global $twitch, $chan, $host, $port, $nick, $pass, $irc, $db;
         
-        $this->chan = $chan;
+        // Force the hash symbol at the start of the channel no matter what
+        $this->chan = ($chan[0] == '#') ? $chan : '#' . $chan;
         $this->host = $host;
         $this->port = $port;
         $this->nick = $nick;
@@ -97,6 +103,9 @@ class burnbot
         if (array_key_exists($host, $this->twitchHosts))
         {
             $this->isTwitch = true;
+            
+            // Force lower case on all Twitch channels so we don't join an invalid channel
+            $this->chan = strtolower($this->chan);
         }
         
         // 'trigger' => array('module', 'function_callback', OPOnly, RegOnly, SubOnly);
@@ -105,10 +114,33 @@ class burnbot
         if ($this->isTwitch)
         {
             // Disable some commands while on Twitch specifically
-            unset($commands['nick']);
+            unset($commands['nick'], $commands['limiters']);
         } else {
             // In standard channels, we disable regulars since we can rely on modes
             unset($commands['addreg'], $commands['delreg']);
+        }
+        
+        // Are we in readOnly mode?
+        if ($this->readOnly)
+        {
+            unset($commands['contact'], 
+                  $commands['google'], 
+                  $commands['help'], 
+                  $commands['listops'], 
+                  $commands['listreg'], 
+                  $commands['modules'], 
+                  $commands['version'], 
+                  $commands['nick'], 
+                  $commands['slap'], 
+                  $commands['addcom'], 
+                  $commands['delcom'], 
+                  $commands['editcom'], 
+                  $commands['addreg'], 
+                  $commands['delreg'], 
+                  $commands['memusage'], 
+                  $commands['limiters'], 
+                  $commands['listcom']
+            );
         }
         
         // Register BurnBot's base commands that provide feedback and perform no actions
@@ -200,21 +232,41 @@ class burnbot
         // Now set up to generate a password for twitch if we are in Twitch mode
         if ($this->isTwitch)
         {
-            $sql = 'SELECT code FROM ' . BURNBOT_TWITCHLOGINS . ' WHERE nick=\'' . $this->nick . '\';';
+            $sql = 'SELECT code,token FROM ' . BURNBOT_TWITCHLOGINS . ' WHERE nick=\'' . $this->nick . '\';';
             $result = $db->sql_query($sql);
-            $code = $db->sql_fetchrow($result)['code'];
+            $arr = $db->sql_fetchrow($result);
+            $code = $arr['code'];
+            $token = trim($arr['token'], 'oauth:');
             $db->sql_freeresult($result);
             
-            $this->pass = $twitch->chat_generateToken(null, $code);            
+            if (isset($token) && ($token != ''))
+            {
+                $this->pass = $twitch->chat_generateToken($token, $code);
+                
+                // Update the token to reflect any changes to it (Validation issues)
+                if ($this->pass != $token)
+                {
+                    $sql = $db->sql_build_update(BURNBOT_TWITCHLOGINS, array('token' => $this->pass), array('nick' => $this->nick));
+                    $result = $db->sql_query($sql);
+                    $db->sql_freeresult($result);                    
+                }
+            } else {
+                $this->pass = $twitch->chat_generateToken(null, $code);
+                
+                // Update the token to reflect any changes to it (Validation issues)
+                $sql = $db->sql_build_update(BURNBOT_TWITCHLOGINS, array('token' => $this->pass), array('nick' => $this->nick));
+                $result = $db->sql_query($sql);
+                $db->sql_freeresult($result);
+            }
         }
         
-        $this->overrideKey = md5($this->version . time() . rand(0, ($this->tickLimiter * 100000)));
+        $this->overrideKey = md5($this->version . time() . rand(0, 1000000));
         
         $irc->_log_action('Setting Session ID: ' . $this->sessionID);
         $irc->_log_action('Quit Override Key: ' . $this->overrideKey);
         
         // Register modules
-        $this->registerModule(array("burnbot", "user"));
+        $this->registerModule(array("core" => true, "user" => true));
         
         // Now grab the data for the channel
         $this->grabCommands();
@@ -282,15 +334,24 @@ class burnbot
     {
         if ($module == '')
         {
-            //people weren't smart
+            // People weren't smart
             return false;
         }
-    }
-    
-    // Resets all commands to the same state they were on load
-    public function reloadCommands()
-    {
         
+        $commands = array();
+        if (array_key_exists($module, $this->loadedModules))
+        {
+            foreach($this->loadedCommands as $trigger => $arr)
+            {
+                if ($arr[0] = $module)
+                {
+                    $commands[] = $trigger;
+                }
+            }
+            
+            $this->unregisterCommands('', $commands);
+            $this->loadedModules[$module] = false;
+        }
     }
 
     public function auth()
@@ -302,18 +363,18 @@ class burnbot
             if (!$this->isTwitch)
             {
                 // Auth to the server when we get our trigger
-                $irc->_write($socket,  "USER $this->nick i * $this->nick@$this->nick");
-                $irc->_write($socket,  "NICK $this->nick");
+                $irc->_write($socket, "USER $this->nick i * $this->nick@$this->nick");
+                $irc->_write($socket, "NICK $this->nick");
                 
                 // If we have a password, now is the time to pass it to the server as well
                 if ($this->pass != '')
                 {
                     $irc->_write($socket, "PASS $this->pass");
-                }                
+                }
             } else {
                 // For Twitch, we AUTH both first and differently
                 $irc->_write($socket, "PASS $this->pass");
-                $irc->_write($socket,  "NICK $this->nick");
+                $irc->_write($socket, "NICK $this->nick");
             }
             
             $this->hasAuthd = true;
@@ -328,27 +389,28 @@ class burnbot
         $this->userCommands = array();
         $commands = array();
         
-        $sql = 'SELECT _trigger,output,ops_only,regulars_only,subs_only FROM ' . BURNBOT_COMMANDS . ' WHERE id=\'' . $db->sql_escape($this->sessionID) . '\';';
+        $sql = 'SELECT _trigger,output,ops,regulars,subs,turbo FROM ' . BURNBOT_COMMANDS . ' WHERE id=\'' . $db->sql_escape($this->sessionID) . '\';';
         $result = $db->sql_query($sql);
         $arr = $db->sql_fetchrowset($result);
         $db->sql_freeresult($result);
         
         if (is_array($arr) && !empty($arr))
-        {
-            $row['ops_only'] = (isset($row['ops_only']) && ($row['ops_only'] == 1)) ? true : false;
-            $row['regulars_only'] = (isset($row['regulars_only']) && $row['regulars_only'] == 1) ? true : false;
-            $row['subs_only'] = (isset($row['subs_only']) && $row['subs_only'] == 1) ? true : false;
-            
+        {            
             foreach ($arr as $row)
             {
-                $commands = array_merge($commands, array($row['_trigger'] => array('user', 'burnbot_userCommand', $row['ops_only'], $row['regulars_only'], $row['subs_only'], $row['output'])));
+                $row['ops'] = (isset($row['ops']) && ($row['ops'] == 1)) ? true : false;
+                $row['regulars'] = (isset($row['regulars']) && $row['regulars'] == 1) ? true : false;
+                $row['subs'] = (isset($row['subs']) && $row['subs'] == 1) ? true : false;
+                $row['turbo'] = (isset($row['turbo']) && $row['turbo'] == 1) ? true : false;
+                
+                $commands = array_merge($commands, array($row['_trigger'] => array('user', 'burnbot_userCommand', $row['ops'], $row['regulars'], $row['subs'], $row['turbo'], $row['output'])));
             }            
         }
         
         $this->registerUserCommands($commands);
     }
     
-    public function insertCommand($trigger, $output, $ops = false, $regulars = false, $subs = false)
+    public function insertCommand($trigger, $output, $ops = false, $regulars = false, $subs = false, $turbo = false)
     {
         global $db, $irc;
         
@@ -364,9 +426,10 @@ class burnbot
             'id' => $this->sessionID,
             '_trigger' => $trigger,
             'output' => $output,
-            'ops_only' => $ops,
-            'regulars_only' => $regulars,
-            'subs_only' => $subs
+            'ops' => $ops,
+            'regulars' => $regulars,
+            'subs' => $subs,
+            'turbo' => $turbo
         ));        
         $result = $db->sql_query($sql);
         $arr = $db->sql_fetchrow($result);
@@ -621,6 +684,33 @@ class burnbot
                     }
                 }
                 
+                // NICK
+                if (isset($messageArr['isNick']))
+                {
+                    // Go through every array and be sure to transfer their layer to the new nick
+                    if (array_key_exists($messageArr['oldNick'], $this->operators))
+                    {
+                        // For logging
+                        $oldNick = $messageArr['oldNick'];
+                        $newNick = $messageArr['newNick'];
+                        
+                        unset($this->operators[$oldNick]);
+                        $this->operators = array_merge($this->operators, array($newNick => true));
+                        $irc->_log_action("Operator for $oldNick has been treansfered to $newNick");
+                    }
+                    
+                    if (array_key_exists($messageArr['oldNick'], $this->regulars))
+                    {
+                        // For logging
+                        $oldNick = $messageArr['oldNick'];
+                        $newNick = $messageArr['newNick'];
+                        
+                        unset($this->regulars[$oldNick]);
+                        $this->regulars = array_merge($this->regulars, array($newNick => true));
+                        $irc->_log_action("Operator for $oldNick has been treansfered to $newNick");
+                    }
+                }
+                
                 // MODE
                 if (isset($messageArr['mode']))
                 {
@@ -666,6 +756,20 @@ class burnbot
                     // Twitch batches JOIN and PART messages, This means we can read through all of those without limits
                     while (isset($messageArr['isJoin']) || isset($messageArr['isPart']))
                     {
+                        if (isset($messageArr['isPart']))
+                        {
+                            // Blind unset our arrays so that people don't stay in arrays when not in the channel
+                            $nick = $messageArr['nick'];
+                            $irc->_log_action("Removing $nick from OP and sub layers");
+                            unset($this->operators[$nick], $this->subscribers[$nick], $this->turboUsers[$nick]);
+                            
+                            // Lastly, if we are not on Twitch, remove the nick from regular as well
+                            if (!$this->isTwitch)
+                            {
+                                unset($this->regulars[$nick]);
+                            }
+                        }
+                        
                         $message = $irc->_read($socket);
                         $messageArr = $irc->checkRawMessage($message);
                     }
@@ -692,7 +796,11 @@ class burnbot
                         if ($this->isTwitch && !$this->hasJoined)
                         {
                             $irc->_joinChannel($socket, $chan);
+                            $irc->_write($socket, "TWITCHCLIENT 2");
                             $this->hasJoined = true;
+                            
+                            // Lastly, change our read limiter to where it should be
+                            $this->tickLimiter = $this->tickLimiterPostJoin;
                         }
                     }
                     
@@ -701,6 +809,9 @@ class burnbot
                     {
                         $irc->_joinChannel($socket, $chan);
                         $this->hasJoined = true;
+                        
+                        // Lastly, change our read limiter to where it should be
+                        $this->tickLimiter = $this->tickLimiterPostJoin;
                     }
                     
                     // We gained a WHO from a channel join
@@ -721,11 +832,11 @@ class burnbot
                 }
                 
                 return;
-            } else {
+            } elseif ($messageArr['type'] == 'private') {
                 // Private message, check for the existance of a command and process the command
                 $words = explode(' ', $messageArr['message']);
                 $sender = $messageArr['nick'];
-                $command = $words[0];
+                $command = strtolower($words[0]);
                 
                 // Quickly reconstruct the rest of the message
                 array_shift($words);
@@ -752,9 +863,9 @@ class burnbot
                                         
                                         break;
                                     
-                                    case 'burnbot':
+                                    case 'core':
                                         // Run this command in the burnbot module
-                                        $this->{$info[1]}($sender, $msg, $command);
+                                        $this->{$info[1]}($sender, $msg);
                                         
                                         break;
                                         
@@ -770,9 +881,50 @@ class burnbot
                         }
                     }
                 }
+            } elseif ($messageArr['type'] == 'twitch_message') {
+                // TWITCHCLIENT message, handle
                 
-                return;
+                // SpecialUser, used for Admin, Subscriber, Staff and Turbo,
+                if ($messageArr['command'] == 'SPECIALUSER')
+                {
+                    $nick = $messageArr['nick'];
+                    
+                    // Add user to Turbo Arr
+                    if ($messageArr['value'] == 'turbo')
+                    {
+                        $irc->_log_action("Adding $nick as a turbo user");
+                        $this->turboUsers = array_merge($this->turboUsers, array($nick => true));
+                    }
+                    
+                    // Add user to Subscriber Arr
+                    if ($messageArr['value'] == 'subscriber')
+                    {
+                        $irc->_log_action("Adding $nick as a subscriber");
+                        $this->subscribers = array_merge($this->subscribers, array($nick => true));
+                    }
+                }
+                
+                // USERCOLOR, defines the user's color assuming it is set.  Not used by the bot itself in any way
+                if ($messageArr['command'] == 'USERCOLOR')
+                {
+                    
+                }
+                
+                // EMOTESET, stores the array of all emote sets the user is allowed
+                if ($messageArr['command'] == 'EMOTESET')
+                {
+                    
+                }
             }
+            
+            // We have handled the message, STOP anything else from seeing it
+            return;
+        }
+        
+        // If we have our twitch module enabled and loaded, pass off to it in case we need to get some data out of it that the main library won't pick up
+        if ($this->isTwitch)
+        {
+            
         }
         
         // If we reached here the message wasn't handled.  We aren't going to return anything here becayuse the read function runs in a loop
@@ -811,8 +963,6 @@ class burnbot
         // Do we have messages in the que?
         if (count($this->messageQue) > 0)
         {
-            $this->processTTL();
-            
             // Check and process the TTL
             if (count($this->messageTTL) < 20)
             {
@@ -839,7 +989,40 @@ class burnbot
                             break;
                     }
                 } else {
-                   $irc->_sendPrivateMessage($socket, $message, $this->chan); 
+                    // We have no args, assume PM
+                    $irc->_sendPrivateMessage($socket, $message, $this->chan); 
+                    
+                }
+
+                // Lastly, add our message onto the TTL stack
+                $this->messageTTL = array_merge($this->messageTTL, array(microtime(true) => $message));
+            } elseif (!$this->limitSends) {
+                // We are ignoring limiters, process the same as above
+                $message = $this->messageQue[0][0];
+                $args = $this->messageQue[0][1];
+                
+                array_shift($this->messageQue); // Move the stack up
+                
+                if (!empty($args))
+                {
+                    // The first value will be the type, always.  This is currently the only use for the $args array
+                    switch($args[0])
+                    {
+                        case 'action':
+                            
+                            $irc->_sendAction($socket, $message, $this->chan);
+                            break;
+                            
+                        // Default is handled like a PM to the channel
+                        case 'pm':
+                        default:
+
+                            $irc->_sendPrivateMessage($socket, $message, $this->chan);
+                            break;
+                    }
+                } else {
+                    // We have no args, assume PM
+                    $irc->_sendPrivateMessage($socket, $message, $this->chan);
                 }
 
                 // Lastly, add our message onto the TTL stack
@@ -864,6 +1047,7 @@ class burnbot
         }
         
         $this->_read();
+        $this->processTTL();
         $this->processQue();
         
         // Are we going to time our peer out at this point?
@@ -900,7 +1084,7 @@ class burnbot
     // Callback functions for commands
     private function burnbot_version($sender, $msg = '')
     {
-        $this->addMessageToQue("@$sender: Current version is $this->version");
+        $this->addMessageToQue("@$sender: Current version is $this->version.  Get it over at https://github.com/IBurn36360/PHP_BurnBot");
     }
     
     private function burnbot_contact($sender, $msg = '')
@@ -910,11 +1094,14 @@ class burnbot
     
     private function burnbot_slap($sender, $msg = '')
     {
-        if ($msg == '')
+        if (array_key_exists($sender, $this->regulars) && array_key_exists($sender, $this->operators))
         {
-            $this->addMessageToQue("Slaps $sender", array('action'));
-        } else {
-            $this->addMessageToQue("Slaps $msg", array('action'));
+            if ($msg == '')
+            {
+                $this->addMessageToQue("Slaps $sender", array('action'));
+            } else {
+                $this->addMessageToQue("Slaps $msg", array('action'));
+            }            
         }
     }
     
@@ -925,7 +1112,7 @@ class burnbot
             // We have the permission to add a command
             $split = explode(' ', $msg);
             
-            $trigger = $split[0];
+            $trigger = strtolower($split[0]);
             array_shift($split);
             $output = implode(' ', $split);
             
@@ -940,7 +1127,7 @@ class burnbot
         {
             $parts = explode(' ', $msg);
             
-            $this->removeCommand($parts[0]);
+            $this->removeCommand(strtolower($parts[0]));
         }
     }
     
@@ -964,7 +1151,7 @@ class burnbot
         $overrideKey = $split[0];
         
         // If we are on Twitch, only the channel owner can tell us to leave.  Easy check
-        if ($this->isTwitch && ($sender = trim($this->chan)))
+        if ($this->isTwitch && ($sender == trim($this->chan, '#')))
         {
             // Make sure we can not reconnect
             $this->reconnectCounter = 0;
@@ -987,12 +1174,13 @@ class burnbot
         if (array_key_exists($sender, $this->operators))
         {
             $split = explode(' ', $msg);
-            $command = (isset($split[0])) ? $split[0] : null;
-            $opsOnly = (isset($split[1])) ? $split[1] : null;
-            $regsOnly = (isset($split[2])) ? $split[2] : null;
-            $subsOnly = (isset($split[3])) ? $split[3] : null;
+            $command = (isset($split[0])) ? strtolower($split[0]) : null;
+            $ops = (isset($split[1])) ? $split[1] : null;
+            $regs = (isset($split[2])) ? $split[2] : null;
+            $subs = (isset($split[3])) ? $split[3] : null;
+            $turbo = (isset($split[4])) ? $split[4] : null;
             
-            for ($i = 1; $i <= 4; $i++)
+            for ($i = 1; $i <= 5; $i++)
             {
                 array_shift($split);
             }
@@ -1000,17 +1188,18 @@ class burnbot
             $output = implode(' ', $split);
             
             // Convert our vars.  Why do I accept to many possible responses?  Who knows
-            $opsOnly = (($opsOnly == 'true') || ($opsOnly == 't') || ($opsOnly == '1') || ($opsOnly == 'yes') || ($opsOnly == 'y')) ? intval(true) : intval(false);
-            $regsOnly = (($regsOnly == 'true') || ($regsOnly == 't') || ($regsOnly == '1') || ($regsOnly == 'yes') || ($regsOnly == 'y')) ? intval(true) : intval(false);
-            $subsOnly = (($subsOnly == 'true') || ($subsOnly == 't') || ($subsOnly == '1') || ($subsOnly == 'yes') || ($subsOnly == 'y')) ? intval(true) : intval(false);
+            $ops = (($ops == 'true') || ($ops == 't') || ($ops == '1') || ($ops == 'yes') || ($ops == 'y')) ? intval(true) : intval(false);
+            $regs = (($regs == 'true') || ($regs == 't') || ($regs == '1') || ($regs == 'yes') || ($regs == 'y')) ? intval(true) : intval(false);
+            $subs = (($subs == 'true') || ($subs == 't') || ($subs == '1') || ($subs == 'yes') || ($subs == 'y')) ? intval(true) : intval(false);
+            $turbo = (($turbo == 'true') || ($turbo == 't') || ($turbo == '1') || ($turbo == 'yes') || ($turbo == 'y')) ? intval(true) : intval(false);
             
             if ($output != '')
             {
                 // Okay, after all is said and done, we still have an output, This means at least we have something to feed back to the channel
-                $commandArr = array('output' => $output, 'ops_only' => $opsOnly, 'regulars_only' => $regsOnly, 'subs_only' => $subsOnly);
+                $commandArr = array('output' => $output, 'ops' => $ops, 'regulars' => $regs, 'subs' => $subs, 'turbo' => $turbo);
                 $this->editCommand($command, $commandArr);
             } else {
-                $this->addMessageToQue("Edit was unable to be performed because there were not enough parameters: !editcom {trigger} {OpsOnly} {RegularsOnly} {SubsOnly} {output}");
+                $this->addMessageToQue("Edit was unable to be performed because there were not enough parameters: " . $this->commandDelimeter . "editcom {trigger} {Ops} {Regulars} {Subs} {Turbo} {output}");
             }
         }
     }
@@ -1022,10 +1211,12 @@ class burnbot
         $OPCommands = '';
         $regCommands = '';
         $subCommands = '';
+        $turboCommands = '';
         $comArr = array();
         $OPArr = array();
         $regArr = array();
         $subArr = array();
+        $turboArr = array();
         
         switch ($module)
         {
@@ -1037,13 +1228,14 @@ class burnbot
                     $op = isset($arr[2]) ? $arr[2] : false;
                     $reg = isset($arr[3]) ? $arr[3] : false;
                     $sub = isset($arr[4]) ? $arr[4] : false;
-                    
+                    $turbo = isset($arr[5]) ? $arr[5] : false;
+                                        
                     // This stops an improperly registered command from being passed into the array
                     if ($mod != $module)
                     {
                         continue;
                     }
-        
+                    
                     if ($op)
                     {
                         $OPArr[]  = $trigger;
@@ -1051,10 +1243,13 @@ class burnbot
                         $regArr[] = $trigger;
                     } elseif ($sub) {
                         $subArr[] = $trigger;
+                    } elseif ($turbo) {
+                        $turboArr[] = $trigger;
                     } else {
                         $comArr[] = $trigger;
                     }
                 }
+                
                 break;
 
             case !'':
@@ -1065,13 +1260,14 @@ class burnbot
                     $op = isset($arr[2]) ? $arr[2] : false;
                     $reg = isset($arr[3]) ? $arr[3] : false;
                     $sub = isset($arr[4]) ? $arr[4] : false;
-                    
+                    $turbo = isset($arr[5]) ? $arr[5] : false;
+                                        
                     // This stops an improperly registered command from being passed into the array
                     if ($mod != $module)
                     {
                         continue;
                     }
-
+                    
                     if ($op)
                     {
                         $OPArr[]  = $trigger;
@@ -1079,19 +1275,24 @@ class burnbot
                         $regArr[] = $trigger;
                     } elseif ($sub) {
                         $subArr[] = $trigger;
+                    } elseif ($turbo) {
+                        $turboArr[] = $trigger;
                     } else {
                         $comArr[] = $trigger;
                     }
                 }
+                
                 break;
             
             default:
                 foreach ($this->loadedCommands + $this->userCommands as $trigger => $arr)
                 {
+                    $mod = isset($arr[0]) ? $arr[0] : '';
                     $op = isset($arr[2]) ? $arr[2] : false;
                     $reg = isset($arr[3]) ? $arr[3] : false;
                     $sub = isset($arr[4]) ? $arr[4] : false;
-        
+                    $turbo = isset($arr[5]) ? $arr[5] : false;
+                    
                     if ($op)
                     {
                         $OPArr[]  = $trigger;
@@ -1099,19 +1300,22 @@ class burnbot
                         $regArr[] = $trigger;
                     } elseif ($sub) {
                         $subArr[] = $trigger;
+                    } elseif ($turbo) {
+                        $turboArr[] = $trigger;
                     } else {
                         $comArr[] = $trigger;
                     }
                 }
+                
                 break;
         }
-
         
         // Sort all arrays alphabetically
         sort($OPArr, SORT_STRING);
         sort($regArr, SORT_STRING);
         sort($subArr, SORT_STRING);
         sort($comArr, SORT_STRING);
+        sort($turboArr, SORT_STRING);
         
         // Construct the strings
         foreach ($OPArr as $trigger)
@@ -1126,6 +1330,10 @@ class burnbot
         {
             $subCommands .= "$$trigger, ";
         }
+        foreach ($turboArr as $trigger)
+        {
+            $turboCommands .= "%$trigger, ";
+        }
         foreach ($comArr as $trigger)
         {
             $commands .= "$trigger, ";
@@ -1137,6 +1345,12 @@ class burnbot
         if (!empty($OPArr) || !empty($regArr) || !empty($subArr) || !empty($comArr))
         {
             $str = "Currently registered commands: $OPCommands$regCommands$subCommands$commands";
+            
+            // Tack this onto the end if nothing was supplied module wise
+            if ($module == '')
+            {
+                $str .= ". [You may also specify a module to list all commands for that module]";
+            }
         } else {
             // Only happens if there is a module specified
             $str = "No commands currently registered to that module";
@@ -1207,10 +1421,11 @@ class burnbot
     {
         global $db, $twitch, $irc;
         
-        $opsonly = $this->userCommands[$trigger][2];
-        $regsOnly = $this->userCommands[$trigger][3];
-        $subsOnly = $this->userCommands[$trigger][4];
-        $output = $this->userCommands[$trigger][5];
+        $ops = $this->userCommands[$trigger][2];
+        $regs = $this->userCommands[$trigger][3];
+        $subs = $this->userCommands[$trigger][4];
+        $turbo = $this->userCommands[$trigger][5];
+        $output = $this->userCommands[$trigger][6];
         $sendMessage = false;
         $suppress = false;
         $allowSend = false;
@@ -1226,26 +1441,30 @@ class burnbot
         }
         
         // Check the perm layers
-        if ($opsonly && array_key_exists($sender, $this->operators))
+        if ($ops && array_key_exists($sender, $this->operators))
         {
             $sendMessage = true;
         }
-        if ($regsOnly && (array_key_exists($sender, $this->operators) || array_key_exists($sender, $this->regulars)))
+        if ($regs && ((array_key_exists($sender, $this->operators) || array_key_exists($sender, $this->regulars))))
         {
             $sendMessage = true;
         }
         // Ignore this if not in twitch
         if (!$this->isTwitch)
         {
-            if ($subsOnly && array_key_exists($sender, $this->subscribers))
+            if ($subs && (array_key_exists($sender, $this->operators) ||array_key_exists($sender, $this->subscribers)))
             {
                 $sendMessage = true;
             }
-                            
+            
+            if ($turbo && (array_key_exists($sender, $this->operators) ||array_key_exists($sender, $this->turboUsers)))
+            {
+                $sendMessage = true;
+            }                            
         }
 
         // Did we go through all cases and not find a permission?
-        if (!$sendMessage && !$opsonly && !$regsOnly && (($subsOnly && !$this->isTwitch) || !$subsOnly))
+        if (!$sendMessage && !$ops && !$regs && (($subs && !$this->isTwitch) || !$subs) && (($turbo && !$this->isTwitch) || !$turbo))
         {
             $sendMessage = true;
         } else {
@@ -1296,9 +1515,12 @@ class burnbot
     {
         $modules = '';
         
-        foreach ($this->loadedModules as $module)
+        foreach ($this->loadedModules as $module => $enabled)
         {
-            $modules .= " $module,";
+            if ($enabled)
+            {
+                $modules .= " $module,";
+            }
         }
         
         $modules = rtrim($modules, ',');
@@ -1312,10 +1534,31 @@ class burnbot
         if (array_key_exists($sender, $this->operators))
         {
             $raw = memory_get_usage();
-            $mB = ($raw / 1024.0) / 1024.0;
+            $mB = round(($raw / 1024.0) / 1024.0, 2);
             
             $this->addMessageToQue("Current memory usage: " . $mB . "Mb || RawBytes: $raw");
         }
+    }
+    
+    private function burnbot_limiters($sender, $msg = '')
+    {
+        if (array_key_exists($sender, $this->operators))
+        {
+            $msg = strtolower($msg);
+            
+            // Check to see if we have a valid option
+            if (($msg == 'true') || ($msg == 't') || ($msg == '1') || ($msg == 'yes') || ($msg == 'y') || ($msg == 'on'))
+            {
+                $this->limitSends = true;
+                $this->addMessageToQue("Limiters enabled: Restricting commands to $this->TTLStack messages in $this->TTL seconds");
+            } elseif (($msg == 'false') || ($msg == 'f') || ($msg == '0') || ($msg == 'no') || ($msg == 'n') || ($msg == 'off')) {
+                $this->limitSends = false;
+                $this->addMessageToQue("Limiters removed");                
+            } else {
+                $str = ($this->limitSends) ? "on" : "off";
+                $this->addMessageToQue("No valid option given, limiters retained as: $str");
+            }
+        }        
     }
     
     /**
@@ -1323,7 +1566,7 @@ class burnbot
      */ 
     private function burnbot_help($sender, $msg = '')
     {
-        $this->addMessageToQue("@$sender: For a list of commands, please use the command !listcom");
+        $this->addMessageToQue("@$sender: For a list of commands, please use the command " . $this->commandDelimeter . "listcom");
     }
 }
 ?>

@@ -68,6 +68,7 @@ class irc
     public function checkRawMessage($message)
     {
         $type = 'system';
+        $message = trim($message, ':');
         $messageArr = array();
         
         // Do we have a private message of any kind? (This also stops people from faking server messages)
@@ -77,33 +78,58 @@ class irc
             
             // Split the message into hostname and message
             $split = explode(' PRIVMSG ', $message);
-            $hostnames = explode('!', $split[0]);
-            $username = trim($hostnames[0], ':');
-            if (isset($hostnames[1]))
-            {
-                $hostname = rtrim($hostnames[1], ' ');
-            } else {
-                return array();
-            }
-            $hostname = trim($hostname, '~');
-            if (isset($split[1]))
-            {
-                $splits = explode(' ', $split[1]); // Do this to split out the channel name
-            } else {
-                return array();
-            }
-            $chan = trim($splits[0], ' ');
-            array_shift($splits);
-            $words = trim(implode(' ', $splits), ':'); // implode to get the message string back (Fix for people being able to use ' :' as a way of avoiding the check)
             
-            // Build the message array
-            $messageArr = array(
-                'type' => $type,
-                'nick' => $username,
-                'host' => $hostname,
-                'chan' => $chan,
-                'message' => $words
-            );
+            // Standard Private message (Except EXTREME edge case)
+            if ($split [0] != 'jtv')
+            {
+                $hostnames = explode('!', $split[0]);
+                $username = $hostnames[0];
+                if (isset($hostnames[1]))
+                {
+                    $hostname = rtrim($hostnames[1], ' ');
+                } else {
+                    return array();
+                }
+                $hostname = trim($hostname, '~');
+                if (isset($split[1]))
+                {
+                    $splits = explode(' ', $split[1]); // Do this to split out the channel name
+                } else {
+                    return array();
+                }
+                $chan = trim($splits[0], ' ');
+                array_shift($splits);
+                $words = trim(implode(' ', $splits), ':'); // implode to get the message string back (Fix for people being able to use ' :' as a way of avoiding the check)
+                
+                // Build the message array
+                $messageArr = array(
+                    'type' => $type,
+                    'nick' => $username,
+                    'host' => $hostname,
+                    'chan' => $chan,
+                    'message' => $words
+                );                
+            } else {
+                // Resplit and start figuring out what info we have now
+                $type = 'twitch_message';
+                $split = explode(':', $message);
+                
+                // The base information from the message is actually useless to us entirely.  What we want is in the message
+                $words = explode(' ', $split[1]);
+                
+                // Set the fields
+                $command = $words[0];
+                $user = $words[1];
+                $value = rtrim(trim($words[2], '['), ']');
+                
+                // Build the array
+                $messageArr = array(
+                    'type' => $type,
+                    'command' => $command,
+                    'user' => $user,
+                    'value' => $value
+                );
+            }
             
             return $messageArr;
         } else {
@@ -112,10 +138,10 @@ class irc
             $type = 'system';
             
             // Do we have a 3 digit number for our second set?  The second check stops PING with a lag timer from tripping this
-            if ((preg_match('([0-9]{3,3})', $split[1]) != 0) && (preg_match('[ping]i', $split[0]) == 0))
+            if (isset($split[1]) && (preg_match('([0-9]{3,3})', $split[1]) != 0) && (preg_match('[ping]i', $split[0]) == 0))
             {
                 // Looks like we do, time to get the rest of the data
-                $hostname = trim($split[0], ':');
+                $hostname = $split[0];
                 $serviceID = $split[1];
                 
                 // Okay, no channel name...Time to look at the service ID instead
@@ -258,7 +284,7 @@ class irc
                     if (preg_match('[!]i', $message) != 0)
                     {
                         $splits = explode('!', $hostnames);
-                        $nick = trim($splits[0], ':');
+                        $nick = $splits[0];
                         $hostnames = explode('@', $splits[1]);
                         $hostname = trim($hostnames[1], '~');
                     } else {
@@ -270,8 +296,8 @@ class irc
                     $messageArr = array(
                         'type' => $type,
                         'isJoin' => true,
-                        'nick' =>$nick,
-                        'host' =>$hostname,
+                        'nick' => $nick,
+                        'host' => $hostname,
                         'chan' => $split[2]
                     );
                     
@@ -287,7 +313,7 @@ class irc
                     if (preg_match('[!]i', $message) != 0)
                     {
                         $splits = explode('!', $hostnames);
-                        $nick = trim($splits[0], ':');
+                        $nick = $splits[0];
                         $hostnames = explode('@', $splits[1]);
                         $hostname = trim($hostnames[1], '~');
                     } else {
@@ -299,8 +325,8 @@ class irc
                     $messageArr = array(
                         'type' => $type,
                         'isPart' => true,
-                        'nick' =>$nick,
-                        'host' =>$hostname,
+                        'nick' => $nick,
+                        'host' => $hostname,
                         'chan' => $split[2]
                     );
                     
@@ -345,6 +371,26 @@ class irc
                     return $messageArr;
                 }
                 
+                // NICK changes
+                // :IBurn36360_!~IBurn3636@c-75-70-217-195.hsd1.co.comcast.net NICK :IBurn36360
+                if (preg_match('[nick]i', $message) != 0)
+                {
+                    $hostnames = explode('!', $split[0]);
+                    $oldNick = $hostnames[0];
+                    $hostname = trim($hostname[1], '~');
+                    $newNick = trim($split[2], ':');
+                    
+                    $messageArr = array(
+                        'type' => $type,
+                        'isNick' => true,
+                        'oldNick' => $oldNick,
+                        'newNick' => $newNick,
+                        'host' => $hostname
+                    );
+                    
+                    return $messageArr;
+                }
+                
                 // AUTH (No-NickServ)
                 if ((preg_match('[NOTICE AUTH]i', $message) != 0))
                 {
@@ -360,14 +406,15 @@ class irc
                 }
                 
                 // AUTH (NickServ)
-                if (preg_match('[NOTICE * ]i', $message) != 0)
+                if (preg_match('[NOTICE *]i', $message) != 0)
                 {
                     $explode = explode(':', $message);
+                    $msg = (isset($explode[1])) ? $explode[1] : '';
                     
                     $messageArr = array(
                         'type' => $type,
                         'isAuth' => true,
-                        'message' => $explode[2]
+                        'message' => $msg
                     );
                     
                     return $messageArr;

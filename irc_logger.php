@@ -133,5 +133,23 @@ class irc_logger extends irc
         @fwrite($h, "\n[ERROR]$logTime || $str");
         @fclose($h);        
     }
+    
+    public function _log_error_handler($errNo, $errStr)
+    {
+        global $file;
+        
+        // does our log file exist?
+        if (!file_exists($file))
+        {
+            $h = @fopen($file, 'w');
+            @fwrite($h, '<?php exit; ?>');
+        } else {
+            $h = @fopen($file, 'a');
+        }
+        
+        $logTime = date('m-d-y~H:i:s', time());
+        @fwrite($h, "\n[PHP_ERROR]$logTime || $errNo:$errStr");
+        @fclose($h);        
+    }
 }
 ?>
