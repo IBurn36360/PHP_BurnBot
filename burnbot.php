@@ -274,7 +274,7 @@ class burnbot
     }
     
     // Accessors to get var data
-    public function getCounter()
+    public function getReconnectCounter()
     {
         return $this->reconnectCounter;
     }
@@ -282,13 +282,16 @@ class burnbot
     {
         return $this->overrideKey;
     }
+    public function getIsTwitch()
+    {
+        return $this->isTwitch;
+    }
+    public function getChan()
+    {
+        return $this->chan;
+    }
     
-    /** Registers commands from modules into the main array for checking.  Commands will have the following structure:
-     * 
-     * The remaining message is the full message stripped of the command
-     * 
-     * 'test' => array('Module', 'function', 'msg')
-     */
+    // Registers
     public function registerCommads($commands = array())
     {
         $this->loadedCommands = array_merge($this->loadedCommands, $commands);
@@ -931,9 +934,37 @@ class burnbot
         // and a return is unneeded calculations.  Still good to note that anything that wasn't handled is dropped entirely though.
     }
 
-    public function addMessageToQue($message, $args = array())
+    public function addMessageToQue($message, $args = array(), $time = 0)
     {
-        return (array_push($this->messageQue, array($message, $args)) != 0);
+        if ($time == 0)
+        {
+            // Set time to the current timestamp, we can send these immediately
+            $time = time();
+        }
+        
+        $success = array_push($this->messageQue, array($message, $args, $time));
+        $sortArr = array();
+        
+        // Sort the stack
+        foreach ($this->messageQue as $key => $arr)
+        {
+            // Make the time the value of the slave key
+            $sortArr[$key] = $arr[2];
+        }
+        
+        $clone = array();
+        asort($sortArr);
+        
+        // Now remerge the array
+        foreach($sortArr as $key => $arr)
+        {
+            $clone[] = $this->messageQue[$key];
+        }
+        
+        // Lastly, resave the array
+        $this->messageQue = $clone;
+        
+        return ($success != 0);
     }
     
     // Processes our TTL stack and removes any and all messages that have expired
@@ -966,67 +997,75 @@ class burnbot
             // Check and process the TTL
             if (count($this->messageTTL) < 20)
             {
-                $message = $this->messageQue[0][0];
-                $args = $this->messageQue[0][1];
-                
-                array_shift($this->messageQue); // Move the stack up
-                
-                if (!empty($args))
+                // Are we able to send this message?
+                $time = $this->messageQue[0][2];
+                $currTime = time();
+                if ($this->messageQue[0][2] <= time())
                 {
-                    // The first value will be the type, always.  This is currently the only use for the $args array
-                    switch($args[0])
-                    {
-                        case 'action':
-                            
-                            $irc->_sendAction($socket, $message, $this->chan);
-                            break;
-                            
-                        // Default is handled like a PM to the channel
-                        case 'pm':
-                        default:
-
-                            $irc->_sendPrivateMessage($socket, $message, $this->chan);
-                            break;
-                    }
-                } else {
-                    // We have no args, assume PM
-                    $irc->_sendPrivateMessage($socket, $message, $this->chan); 
+                    // Set message and args array
+                    $message = $this->messageQue[0][0];
+                    $args = $this->messageQue[0][1];
                     
-                }
-
-                // Lastly, add our message onto the TTL stack
-                $this->messageTTL = array_merge($this->messageTTL, array(microtime(true) => $message));
-            } elseif (!$this->limitSends) {
-                // We are ignoring limiters, process the same as above
-                $message = $this->messageQue[0][0];
-                $args = $this->messageQue[0][1];
-                
-                array_shift($this->messageQue); // Move the stack up
-                
-                if (!empty($args))
-                {
-                    // The first value will be the type, always.  This is currently the only use for the $args array
-                    switch($args[0])
+                    array_shift($this->messageQue); // Move the stack up
+                    
+                    if (!empty($args))
                     {
-                        case 'action':
-                            
-                            $irc->_sendAction($socket, $message, $this->chan);
-                            break;
-                            
-                        // Default is handled like a PM to the channel
-                        case 'pm':
-                        default:
-
-                            $irc->_sendPrivateMessage($socket, $message, $this->chan);
-                            break;
+                        // The first value will be the type, always.  This is currently the only use for the $args array
+                        switch($args[0])
+                        {
+                            case 'action':
+                                
+                                $irc->_sendAction($socket, $message, $this->chan);
+                                break;
+                                
+                            // Default is handled like a PM to the channel
+                            case 'pm':
+                            default:
+    
+                                $irc->_sendPrivateMessage($socket, $message, $this->chan);
+                                break;
+                        }
+                    } else {
+                        // We have no args, assume PM
+                        $irc->_sendPrivateMessage($socket, $message, $this->chan); 
+                        
                     }
-                } else {
-                    // We have no args, assume PM
-                    $irc->_sendPrivateMessage($socket, $message, $this->chan);
+    
+                    // Lastly, add our message onto the TTL stack
+                    $this->messageTTL = array_merge($this->messageTTL, array(microtime(true) => $message));                    
                 }
-
-                // Lastly, add our message onto the TTL stack
-                $this->messageTTL = array_merge($this->messageTTL, array(microtime(true) => $message));
+            } elseif (!$this->limitSends) {
+                // Are we able to send this message?
+                if ($time <= time())
+                {
+                    array_shift($this->messageQue); // Move the stack up
+                    
+                    if (!empty($args))
+                    {
+                        // The first value will be the type, always.  This is currently the only use for the $args array
+                        switch($args[0])
+                        {
+                            case 'action':
+                                
+                                $irc->_sendAction($socket, $message, $this->chan);
+                                break;
+                                
+                            // Default is handled like a PM to the channel
+                            case 'pm':
+                            default:
+    
+                                $irc->_sendPrivateMessage($socket, $message, $this->chan);
+                                break;
+                        }
+                    } else {
+                        // We have no args, assume PM
+                        $irc->_sendPrivateMessage($socket, $message, $this->chan); 
+                        
+                    }
+    
+                    // Lastly, add our message onto the TTL stack
+                    $this->messageTTL = array_merge($this->messageTTL, array(microtime(true) => $message));                    
+                }
             }
         }
     }
