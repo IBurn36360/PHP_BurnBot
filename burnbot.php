@@ -55,12 +55,13 @@ class burnbot
     
     var $burnbotCommands = array(
         'contact' => array('core', 'burnbot_contact', false, false, false, false),
-        'google'  => array('core', 'burnbot_google', false, false, false, false),
-        'help'    => array('core', 'burnbot_help', false, false, false, false),
-        'listcom' => array('core', 'burnbot_listcom', false, false, false, false),
-        'listops' => array('core', 'burnbot_listops', false, false, false, false),
-        'listreg' => array('core', 'burnbot_listreg', false, false, false, false),
-        'modules' => array('core', 'burnbot_loadedModules', false, false, false, false),
+        'google'  => array('core', 'burnbot_google', false, true, false, false),
+        'help'    => array('core', 'burnbot_help', false, true, false, false),
+        'listcom' => array('core', 'burnbot_listcom', false, true, false, false),
+        'listops' => array('core', 'burnbot_listops', true, false, false, false),
+        'listreg' => array('core', 'burnbot_listreg', true, false, false, false),
+        'modules' => array('core', 'burnbot_loadedModules', true, false, false, false),
+        'module'  => array('core', 'burnbot_module', true, false, false, false),
         'version' => array('core', 'burnbot_version', false, false, false, false),
         'nick'    => array('core', 'burnbot_nick', false, true, false, false),
         'slap'    => array('core', 'burnbot_slap', false, true, false, false),
@@ -74,10 +75,6 @@ class burnbot
         'limiters'=> array('core', 'burnbot_limiters', true, false, false, false)
     );
     
-    /**
-     * Structure: UNKEYED ARRAY
-     *  [0] => array('message Type', array('message Args'))
-    */
     var $messageQue = array();
     
     // Limits message sends
@@ -108,7 +105,166 @@ class burnbot
             $this->chan = strtolower($this->chan);
         }
         
-        // 'trigger' => array('module', 'function_callback', OPOnly, RegOnly, SubOnly);
+        // Now grab the session ID we will be using for DB queries
+        $sql = $db->sql_build_select(BURNBOT_CONNECTIONS, array(
+            'id'
+        ), array(
+            'host' => $host,
+            'channel' => $chan
+        ));
+        $result = $db->sql_query($sql);
+        $this->sessionID = $db->sql_fetchrow($result)['id'];
+        $db->sql_freeresult($result);
+        
+        if ($this->sessionID == '')
+        {
+            $irc->_log_action("Creating new entry for session");
+            $host = ($this->isTwitch) ? 'irc.twitch.tv' : $host ;
+            $sql = $db->sql_build_insert(BURNBOT_CONNECTIONS, array(
+                'host' => $host,
+                'channel' => $chan
+            ));
+            $result = $db->sql_query($sql);
+            
+            $sql = $db->sql_build_select(BURNBOT_CONNECTIONS, array(
+                'id'
+            ), array(
+                'host' => $host,
+                'channel' => $chan
+            ));
+            $result = $db->sql_query($sql);
+            
+            // Okay, now we have the ID, store it
+            $this->sessionID = $db->sql_fetchrow($result)['id'];
+            $db->sql_freeresult($result);
+        }
+            
+        // Now set up to generate a password for twitch if we are in Twitch mode
+        if ($this->isTwitch)
+        {
+            // Register the regulars
+            $this->getRegulars();
+        }
+        
+        $this->overrideKey = md5($this->version . time() . rand(0, 1000000));
+        
+        $irc->_log_action('Setting Session ID: ' . $this->sessionID);
+        $irc->_log_action('Quit Override Key: ' . $this->overrideKey);
+        
+        // Register the base modules
+        $this->registerModule(array("core" => true, "user" => true));
+        
+        $irc->_log_action('Burnbot environment constructed');
+    }
+    
+    // Be sure to properly close the socket BEFORE the script dies for whatever reason
+    private function exitHandler()
+    {
+        global $irc, $socket;
+        
+        $irc->_write($socket, 'QUIT :Script was killed or exited');
+        
+        // Wait for the peer to get the command, if they do not disconnect us, we will close the socket forcibly
+        usleep(500000);
+        $irc->disconnect($socket);
+        $socket = null;
+        
+        // Update our Auth in case we want to reconnect from our external parent
+        $this->hasAuthd = false;
+        $this->hasJoined = false;
+        
+        // Reset timers as well
+        $this->lastPingTime = 0;
+        $this->lastPongTime = 0;
+        
+        // Hard stop the script here since we were passed here
+        echo '<hr />Script was passed to exit handler.  Now killing script entirely<hr />';
+        exit;
+    }
+    
+    private function timeoutPeer()
+    {
+      global $socket;
+        
+        $irc->_write($socket, 'QUIT :Ping timeout (180 seconds)');
+        
+        usleep(500000);
+        $irc->disconnect($socket);
+        $socket = null;
+        
+        // Update our Auth in case we want to reconnect
+        $this->hasAuthd = false;
+        $this->hasJoined = false;
+        
+        // Reset timers as well
+        $this->lastPingTime = 0;
+        $this->lastPongTime = 0;
+        
+        // Reconnect to the socket
+        while ($this->reconnectCounter != 0)
+        {
+            $this->reconnect();
+        }
+        
+        if ($socket !== null)
+        {
+            $this->reconnectCounter = 5;
+        }
+    }
+    
+    // Store the socket as a class var we can use easily
+    public function init()
+    {
+        global $twitch, $db;
+        
+        // Check to see if we are in our first init phase and if we need to gen a password
+        if ($this->isTwitch && ($this->pass == ''))
+        {
+            $sql = $db->sql_build_select(BURNBOT_TWITCHLOGINS, array(
+                'code',
+                'token'
+            ), array(
+                'nick' => $this->nick
+            ));
+            $result = $db->sql_query($sql);
+            $arr = $db->sql_fetchrow($result);
+            $code = $arr['code'];
+            $token = trim($arr['token'], 'oauth:');
+            $db->sql_freeresult($result);
+            
+            if (isset($token) && ($token != ''))
+            {
+                $this->pass = $twitch->chat_generateToken($token, $code);
+                
+                // Update the token to reflect any changes to it (Validation issues)
+                if ($this->pass != $token)
+                {
+                    $sql = $db->sql_build_update(BURNBOT_TWITCHLOGINS, array(
+                        'token' => $this->pass
+                    ), array(
+                        'nick' => $this->nick
+                    ));
+                    $result = $db->sql_query($sql);
+                    $db->sql_freeresult($result);                    
+                }
+            } else {
+                $this->pass = $twitch->chat_generateToken(null, $code);
+                
+                // Update the token to reflect any changes to it (Validation issues)
+                $sql = $db->sql_build_update(BURNBOT_TWITCHLOGINS, array(
+                    'token' => $this->pass
+                ), array(
+                    'nick' => $this->nick
+                ));
+                $result = $db->sql_query($sql);
+                $db->sql_freeresult($result);
+            }
+        }
+        
+        // First, flush all of our loaded comands
+        $this->loadedCommands = array();
+        $this->userCommands = array();
+        
         $commands = $this->burnbotCommands;
         
         if ($this->isTwitch)
@@ -143,134 +299,123 @@ class burnbot
             );
         }
         
-        // Register BurnBot's base commands that provide feedback and perform no actions
+        // Register Core's commands
         $this->registerCommads($commands);
+         
+        // Now grab the user commands
+        $this->grabCommands();
         
-        $irc->_log_action('Burnbot constructed and commands registered');
-    }
-    
-    // Be sure to properly close the socket BEFORE the script dies for whatever reason
-    private function exitHandler()
-    {
-        global $irc, $socket;
-        
-        $irc->_write($socket, 'QUIT :Script was killed or exited');
-        
-        // Wait for the peer to get the command, if they do not disconnect us, we will close the socket forcibly
-        usleep(500000);
-        $irc->disconnect($socket);
-        $socket = null;
-        
-        // Update our Auth in case we want to reconnect from our external parent
-        $this->hasAuthd = false;
-        $this->hasJoined = false;
-        
-        // Reset timers as well
-        $this->lastPingTime = 0;
-        $this->lastPongTime = 0;
-        
-        // Hard stop the script here since we were passed here
-        echo '<hr />Script was passed to exit handler.  Now killing script entirely<hr />';
-        exit;
-    }
-    
-    private function timeoutPeer()
-    {
-      global $irc, $socket;
-        
-        $irc->_write($socket, 'QUIT :Ping timeout (180 seconds)');
-        
-        usleep(500000);
-        $irc->disconnect($socket);
-        $socket = null;
-        
-        // Update our Auth in case we want to reconnect
-        $this->hasAuthd = false;
-        $this->hasJoined = false;
-        
-        // Reset timers as well
-        $this->lastPingTime = 0;
-        $this->lastPongTime = 0;
-        
-        // Reconnect to the socket
-        while ($this->reconnectCounter != 0)
-        {
-            $this->reconnect();
-        }
-        
-        if ($socket !== null)
-        {
-            $this->reconnectCounter = 5;
-        }
-    }
-    
-    // Store the socket as a class var we can use easily
-    public function init()
-    {
-        global $twitch, $db, $host, $chan, $irc;
-        
-        // Now grab the session ID we will be using for DB queries
-        $sql = 'SELECT id FROM ' . BURNBOT_CONNECTIONS . ' WHERE host=\'' . $db->sql_escape($host) . '\' AND channel=\'' .  $db->sql_escape($chan) . '\';';
+        // Load our module config and be sure we disable any modules the chan wants disabled on init
+        $mod = array();
+        $sql = $db->sql_build_select(BURNBOT_MODULES_CONFIG, array(
+            'enabled',
+            'module'
+        ), array(
+            'id' => $this->sessionID,
+            
+        ));
         $result = $db->sql_query($sql);
-        $this->sessionID = $db->sql_fetchrow($result)['id'];
+        $modules = $db->sql_fetchrowset($result);
         $db->sql_freeresult($result);
         
-        if ($this->sessionID == '')
+        if (!empty($modules))
         {
-            $irc->_log_action("Creating new entry for session");
-            $host = ($this->isTwitch) ? 'irc.twitch.tv' : $host ;
-            $sql = 'INSERT INTO ' . BURNBOT_CONNECTIONS . ' (host, channel) VALUES (\'' . $db->sql_escape($host) . '\', \'' . $db->sql_escape($chan) . '\');';
-            $result = $db->sql_query($sql);
-            $sql = 'SELECT id FROM ' . BURNBOT_CONNECTIONS . ' WHERE host=\'' . $db->sql_escape($host) . '\' AND channel=\'' .  $db->sql_escape($chan) . '\';';
-            $result = $db->sql_query($sql);
-            
-            // Okay, now we have the ID, store it
-            $this->sessionID = $db->sql_fetchrow($result)['id'];
-            $db->sql_freeresult($result);
-        }
-            
-        // Now set up to generate a password for twitch if we are in Twitch mode
-        if ($this->isTwitch)
-        {
-            $sql = 'SELECT code,token FROM ' . BURNBOT_TWITCHLOGINS . ' WHERE nick=\'' . $this->nick . '\';';
-            $result = $db->sql_query($sql);
-            $arr = $db->sql_fetchrow($result);
-            $code = $arr['code'];
-            $token = trim($arr['token'], 'oauth:');
-            $db->sql_freeresult($result);
-            
-            if (isset($token) && ($token != ''))
+            foreach ($modules as $row)
             {
-                $this->pass = $twitch->chat_generateToken($token, $code);
+                $enabled = ($row['enabled'] == 1) ? true : false;
                 
-                // Update the token to reflect any changes to it (Validation issues)
-                if ($this->pass != $token)
-                {
-                    $sql = $db->sql_build_update(BURNBOT_TWITCHLOGINS, array('token' => $this->pass), array('nick' => $this->nick));
-                    $result = $db->sql_query($sql);
-                    $db->sql_freeresult($result);                    
-                }
-            } else {
-                $this->pass = $twitch->chat_generateToken(null, $code);
-                
-                // Update the token to reflect any changes to it (Validation issues)
-                $sql = $db->sql_build_update(BURNBOT_TWITCHLOGINS, array('token' => $this->pass), array('nick' => $this->nick));
-                $result = $db->sql_query($sql);
-                $db->sql_freeresult($result);
+                $this->loadedModules[$row['module']] = $enabled;
             }
         }
         
-        $this->overrideKey = md5($this->version . time() . rand(0, 1000000));
+        // Go through the init phases of every registered module
+        foreach ($this->loadedModules as $module => $enabled)
+        {
+            // is this module actually enabled at this point in time?  If not, skip their init phase
+            if ($enabled == true)
+            {
+                // Run every module's init code if they have any to run.  All commands need to be registered here
+                switch($module)
+                {
+                    case 'twitch':
+                        $twitch->init();
+                        break;
+                        
+                    default:
+                        break;
+                }
+            }
+        }
         
-        $irc->_log_action('Setting Session ID: ' . $this->sessionID);
-        $irc->_log_action('Quit Override Key: ' . $this->overrideKey);
+        // Now that we have init completed, go to post-init and load the channel configs
+        $this->postInit();
+    }
+    
+    // This loads any configuread disabled or changes the channel has made to commands
+    private function postInit()
+    {
+        global $db;
         
-        // Register modules
-        $this->registerModule(array("core" => true, "user" => true));
+        $commands = array();
         
-        // Now grab the data for the channel
-        $this->grabCommands();
-        $this->getRegulars();
+        // Grab the command config, since the module config can override any of these when modules are disabled
+        $sql = $db->sql_build_select(BURNBOT_COMMANDS_CONFIG, array(
+            '_trigger',
+            'ops',
+            'regs',
+            'subs',
+            'turbo',
+            'enabled'
+        ), array(
+            'id' => $this->sessionID
+        ));
+        $result = $db->sql_query($sql);
+        $rows = $db->sql_fetchrowset($result);
+        $db->sql_freeresult($result);
+        
+        if (!empty($rows))
+        {
+            foreach ($rows as $row)
+            {
+                // Are we disabling the command?
+                if (isset($row['enabled']) && ($row['enabled'] == 1))
+                {
+                    $mod = $this->loadedCommands[$row['_trigger']][0];
+                    $func = $this->loadedCommands[$row['_trigger']][1];
+                    $ops = ($row['ops'] == 1) ? true : false;
+                    $regs = ($row['regs'] == 1) ? true : false;
+                    $subs = ($row['subs'] == 1) ? true : false;
+                    $turbo = ($row['turbo'] == 1) ? true : false;
+                    
+                    $commands[$row['_trigger']] = array($mod, $func, $ops, $regs, $subs, $turbo);
+                } else {
+                    unset($this->loadedCommands[$row['_trigger']]);
+                }
+            }       
+        }
+        
+        // Now load the module config
+        $sql = $db->sql_build_select(BURNBOT_MODULES_CONFIG, array(
+            'module',
+            'enabled'
+        ), array(
+            'id' => $this->sessionID
+        ));
+        $result = $db->sql_query($sql);
+        $rows = $db->sql_fetchrowset($result);
+        $db->sql_freeresult($result);
+        
+        if (!empty($rows))
+        {
+            foreach($rows as $row)
+            {
+                // Do nothing if the module is enabled
+                if ($row['enabled'] == 0)
+                {
+                    $this->unregisterModule($row['module']);
+                }
+            }
+        }
     }
     
     // Accessors to get var data
@@ -289,6 +434,14 @@ class burnbot
     public function getChan()
     {
         return $this->chan;
+    }
+    public function getReadOnly()
+    {
+        return $this->readOnly;
+    }
+    public function getSessionID()
+    {
+        return $this->sessionID;
     }
     
     // Registers
@@ -335,6 +488,7 @@ class burnbot
     
     public function unregisterModule($module = '')
     {
+        
         if ($module == '')
         {
             // People weren't smart
@@ -346,7 +500,7 @@ class burnbot
         {
             foreach($this->loadedCommands as $trigger => $arr)
             {
-                if ($arr[0] = $module)
+                if ($arr[0] == $module)
                 {
                     $commands[] = $trigger;
                 }
@@ -386,13 +540,24 @@ class burnbot
     
     public function grabCommands()
     {
-        global $db;
+        global $db, $irc;
         
         // Unset the main command array since we are about to grab a fresh batch
         $this->userCommands = array();
         $commands = array();
         
-        $sql = 'SELECT _trigger,output,ops,regulars,subs,turbo FROM ' . BURNBOT_COMMANDS . ' WHERE id=\'' . $db->sql_escape($this->sessionID) . '\';';
+        // Construct in this way to make adding a whole hell of a lot easier in the future
+        $sql = $db->sql_build_select(BURNBOT_COMMANDS, array(
+            '_trigger',
+            'output',
+            'ops',
+            'regulars',
+            'subs',
+            'turbo'
+        ), array(
+            'id' => $this->sessionID,
+        ));
+        
         $result = $db->sql_query($sql);
         $arr = $db->sql_fetchrowset($result);
         $db->sql_freeresult($result);
@@ -425,6 +590,12 @@ class burnbot
             return;
         }
         
+        if (($trigger == 'enable') || ($trigger == 'disable'))
+        {
+            $this->addMessageToQue("The trigger $trigger is reserved, please choose another trigger");
+            return;
+        }
+        
         $sql = $db->sql_build_insert(BURNBOT_COMMANDS, array(
             'id' => $this->sessionID,
             '_trigger' => $trigger,
@@ -453,7 +624,10 @@ class burnbot
     {
         global $db;
         
-        $sql = 'DELETE FROM ' . BURNBOT_COMMANDS . ' WHERE id=\'' . $db->sql_escape($this->sessionID) . '\' AND _trigger=\'' . $db->sql_escape($trigger) . '\';';
+        $sql = $db->sql_build_delete(BURNBOT_COMMANDS, array(
+            'id' => $this->sessionID, 
+            '_trigger' => $trigger
+        ));
         $result = $db->sql_query($sql);
         $arr = $db->sql_fetchrow($result);
         $db->sql_freeresult($result);
@@ -472,20 +646,21 @@ class burnbot
     {
         global $db, $irc;
         
-        $whereArr = array('id' => $this->sessionID, '_trigger' => $command);
-        
-        $sql = $db->sql_build_update(BURNBOT_COMMANDS, $commandArr, $whereArr);
-        
-        $irc->_log_action("Running query: $sql");
+        $sql = $db->sql_build_update(BURNBOT_COMMANDS, $commandArr, array(
+            'id' => $this->sessionID, 
+            '_trigger' => $command
+        ));
         
         $result = $db->sql_query($sql);
         $success = $db->sql_fetchrow($result);
         $db->sql_freeresult($result);
         
+        $output = $commandArr['output'];
+        
         // Anything other than false is considered a success
         if ($success !== false)
         {
-            $this->addMessageToQue("Command $command has been updated.  Please test command to ensure that everything is correct.");
+            $this->addMessageToQue("Command $command has been updated: $output");
         } else {
             $this->addMessageToQue("Command $command was unable to be updated.  Either it does not exist or your syntax was incorrect.");
         }
@@ -498,9 +673,10 @@ class burnbot
     {
         global $db, $irc;
         
-        $construct = array();
-        
-        $sql = 'INSERT INTO ' . BURNBOT_REGULARS . ' (id,username) VALUES (\'' . $db->sql_escape($this->sessionID) . '\', \'' . $db->sql_escape($username) . '\');';
+        $sql = $db->sql_build_insert(BURNBOT_REGULARS, array(
+            'id' => $this->sessionID,
+            'username' => $username
+        ));
         $result = $db->sql_query($sql);
         $arr = $db->sql_fetchrow($result);
         $db->sql_freeresult($result);
@@ -512,7 +688,10 @@ class burnbot
     {
         global $db;
         
-        $sql = 'DELETE FROM ' . BURNBOT_REGULARS . ' WHERE id=\'' . $db->sql_escape($this->sessionID) . '\' AND username=\'' . $db->sql_escape($username) . '\';';
+        $sql = $db->sql_build_delete(BURNBOT_REGULARS, array(
+            'id' => $this->sessionID,
+            'username' => $username
+        ));
         $result = $db->sql_query($sql);
         $arr = $db->sql_fetchrow($result);
         $db->sql_freeresult($result);
@@ -527,7 +706,11 @@ class burnbot
         // Purge the list
         $this->regulars = array();
         
-        $sql = 'SELECT username FROM ' . BURNBOT_REGULARS . ' WHERE id=\'' . $db->sql_escape($this->sessionID) . '\';';
+        $sql = $db->sql_build_select(BURNBOT_REGULARS, array(
+            'username'
+        ), array(
+            'id' => $this->sessionID
+        ));
         $result = $db->sql_query($sql);
         $arr = $db->sql_fetchrowset($result);
         $db->sql_freeresult($result);
@@ -639,6 +822,47 @@ class burnbot
         {
             $this->regulars[$nick] = null;
         }
+    }
+    
+    public function checkCommandPerm($user, $trigger)
+    {
+        // Assign layers
+        if (array_key_exists($trigger, $this->loadedCommands))
+        {
+            $op = $this->loadedCommands[$trigger][2];
+            $reg = $this->loadedCommands[$trigger][3];
+            $sub = $this->loadedCommands[$trigger][4];
+            $turbo = $this->loadedCommands[$trigger][5];            
+        } elseif (array_key_exists($trigger, $this->userCommands)) {
+            $op = $this->userCommands[$trigger][2];
+            $reg = $this->userCommands[$trigger][3];
+            $sub = $this->userCommands[$trigger][4];
+            $turbo = $this->userCommands[$trigger][5];                 
+        } else {
+            // The command doesn't exist.  We should never reach here, but this is a catch case either way
+            return false;
+        }
+        
+        // Are any layers assigned...if not, we will assume true
+        if ($op || $reg || $sub || $turbo)
+        {
+            // Now go through the layers one at a time, high to low
+            if ($op && array_key_exists($user, $this->operators))
+            {
+                return true;
+            } elseif ($reg && (array_key_exists($user, $this->operators) || array_key_exists($user, $this->regulars))) {
+                return true;
+            } elseif ($sub && (array_key_exists($user, $this->operators) || array_key_exists($user, $this->subscribers))) {
+                return true;
+            } elseif ($turbo && (array_key_exists($user, $this->operators) || array_key_exists($user, $this->turboUsers))) {
+                return true;
+            }
+        } else {
+            return true;
+        }
+        
+        // If we reached here, assume that checks failed
+        return false;
     }
     
     // Reads the message we recieved and adds any message triggers we need to.  Also triggers a command to be added
@@ -855,28 +1079,32 @@ class burnbot
                         {
                             if ($trigger == trim($command, $this->commandDelimeter))
                             {
-                                // Now pass the data to the command, we are done here
-                                switch ($info[0])
+                                // Does the sender have the permission for the command?
+                                if ($this->checkCommandPerm($sender, $trigger))
                                 {
-                                    // CHECK THIS FIRST
-                                    // We don't add anthing to info, so this case WILL break later checks
-                                    case 'user':
-                                        // Run this command in the burnbot module.  Specifically the user defined command handler
-                                        $this->burnbot_userCommand($sender, $trigger);
+                                    // Now pass the data to the command, we are done here
+                                    switch ($info[0])
+                                    {
+                                        // CHECK THIS FIRST
+                                        // We don't add anthing to info, so this case WILL break later checks
+                                        case 'user':
+                                            // Run this command in the burnbot module.  Specifically the user defined command handler
+                                            $this->burnbot_userCommand($sender, $trigger);
+                                            
+                                            break;
                                         
-                                        break;
-                                    
-                                    case 'core':
-                                        // Run this command in the burnbot module
-                                        $this->{$info[1]}($sender, $msg);
-                                        
-                                        break;
-                                        
-                                    default:
-                                        // The command isn't defined properly, drop an error into the log and pass out to the chat as well
-                                        $irc->_log_error("Error attempting to run command $trigger.  No information array provided");
-                                        $this->addMessageToQue("Error attempting to run command $trigger.  No information array provided");
-                                        break;
+                                        case 'core':
+                                            // Run this command in the burnbot module
+                                            $this->{$info[1]}($sender, $msg);
+                                            
+                                            break;
+                                            
+                                        default:
+                                            // The command isn't defined properly, drop an error into the log and pass out to the chat as well
+                                            $irc->_log_error("Error attempting to run command $trigger.  No information array provided");
+                                            $this->addMessageToQue("Error attempting to run command $trigger.  No information array provided");
+                                            break;
+                                    }
                                 }
                                 
                                 break; // We are done here, no need to continue
@@ -913,8 +1141,14 @@ class burnbot
                     
                 }
                 
-                // EMOTESET, stores the array of all emote sets the user is allowed
+                // EMOTESET, stores the array of all emote sets the user is allowed.  Not used by the bot itself in any way
                 if ($messageArr['command'] == 'EMOTESET')
+                {
+                    
+                }
+                
+                // CLEARCHAT event, this deletes messages for a user.  Not used by the bot itself in any way
+                if ($messageArr['command'] == 'CLEARCHAT')
                 {
                     
                 }
@@ -1133,41 +1367,32 @@ class burnbot
     
     private function burnbot_slap($sender, $msg = '')
     {
-        if (array_key_exists($sender, $this->regulars) && array_key_exists($sender, $this->operators))
+        if ($msg == '')
         {
-            if ($msg == '')
-            {
-                $this->addMessageToQue("Slaps $sender", array('action'));
-            } else {
-                $this->addMessageToQue("Slaps $msg", array('action'));
-            }            
-        }
+            $this->addMessageToQue("Slaps $sender", array('action'));
+        } else {
+            $this->addMessageToQue("Slaps $msg", array('action'));
+        }            
     }
     
     private function burnbot_addcom($sender, $msg = '')
     {
-        if (array_key_exists($sender, $this->operators))
-        {
-            // We have the permission to add a command
-            $split = explode(' ', $msg);
-            
-            $trigger = strtolower($split[0]);
-            array_shift($split);
-            $output = implode(' ', $split);
-            
-            $this->insertCommand($trigger, $output);
-        }
+        // We have the permission to add a command
+        $split = explode(' ', $msg);
+        
+        $trigger = strtolower($split[0]);
+        array_shift($split);
+        $output = implode(' ', $split);
+        
+        $this->insertCommand($trigger, $output);
     }
     
     private function burnbot_delcom($sender, $msg = '')
     {
         // And this is why ALL arrays use keys.  You can not search via value
-        if (array_key_exists($sender, $this->operators))
-        {
-            $parts = explode(' ', $msg);
-            
-            $this->removeCommand(strtolower($parts[0]));
-        }
+        $parts = explode(' ', $msg);
+        
+        $this->removeCommand(strtolower($parts[0]));
     }
     
     private function burnbot_nick($sender, $msg = '')
@@ -1175,12 +1400,9 @@ class burnbot
         global $irc, $socket;
         
         $nick = $msg;
-        
-        if (array_key_exists($sender, $this->operators) || array_key_exists($sender, $this->regulars))
-        {
-            // Nick is handled by Edge, no need to stack the command
-            $irc->_write($socket, "NICK $nick");
-        }
+
+        // Nick is handled by Edge, no need to stack the command
+        $irc->_write($socket, "NICK $nick");
     }
     
     // There is currently no override here.  Might have to add one later
@@ -1209,36 +1431,175 @@ class burnbot
     // Edit the command specified
     private function burnbot_editcom($sender, $msg = '')
     {
-        // Required structure: 'opsOnly' 'regsOnly' 'subsOnly' 'Output string'
-        if (array_key_exists($sender, $this->operators))
+        global $db, $irc;
+        
+        $split = explode(' ', $msg);
+        
+        if (($split[0] == 'enable') || ($split[0] == 'disable'))
         {
-            $split = explode(' ', $msg);
-            $command = (isset($split[0])) ? strtolower($split[0]) : null;
-            $ops = (isset($split[1])) ? $split[1] : null;
-            $regs = (isset($split[2])) ? $split[2] : null;
-            $subs = (isset($split[3])) ? $split[3] : null;
-            $turbo = (isset($split[4])) ? $split[4] : null;
+            $state = $split[0];
+            $trigger = (isset($split[1])) ? $trigger : false ;
             
-            for ($i = 1; $i <= 5; $i++)
+            // check for a protected command
+            if (($trigger == 'quit') || ($trigger == 'editcom') || ($trigger == 'module'))
             {
-                array_shift($split);
+                // Disallow this command to be enabled and disabled.  Quit will be disallowed from edit later on.
+                $this->addMessageToQue("Command trigger $trigger is protected and can not be enabled or disabled");
+                return;
             }
             
-            $output = implode(' ', $split);
-            
-            // Convert our vars.  Why do I accept to many possible responses?  Who knows
-            $ops = (($ops == 'true') || ($ops == 't') || ($ops == '1') || ($ops == 'yes') || ($ops == 'y')) ? intval(true) : intval(false);
-            $regs = (($regs == 'true') || ($regs == 't') || ($regs == '1') || ($regs == 'yes') || ($regs == 'y')) ? intval(true) : intval(false);
-            $subs = (($subs == 'true') || ($subs == 't') || ($subs == '1') || ($subs == 'yes') || ($subs == 'y')) ? intval(true) : intval(false);
-            $turbo = (($turbo == 'true') || ($turbo == 't') || ($turbo == '1') || ($turbo == 'yes') || ($turbo == 'y')) ? intval(true) : intval(false);
-            
-            if ($output != '')
+            // did command, toss some feedback at the user
+            if (!$trigger)
             {
-                // Okay, after all is said and done, we still have an output, This means at least we have something to feed back to the channel
-                $commandArr = array('output' => $output, 'ops' => $ops, 'regulars' => $regs, 'subs' => $subs, 'turbo' => $turbo);
-                $this->editCommand($command, $commandArr);
+                $this->addMessageToQue('Please specify a command trigger to modify');
+                return;
+            }
+            
+            if ($state == 'disable')
+            {
+                unset($this->loadedCommands[$trigger]);
+                
+                // Now update the database
+                $sql = $db->sql_build_select(BURNBOT_COMMANDS_CONFIG, array(
+                    '*'
+                ), array(
+                    'id' => $this->sessionID,
+                    '_trigger' => $trigger
+                ));
+                $result = $db->sql_query($sql);
+                $arr = $db->sql_fetchrow($result);
+                $db->sql_freeresult($result);
+                
+                if (empty($arr))
+                {
+                    // No data, insert time
+                    $sql = $db->sql_build_insert(BURNBOT_COMMANDS_CONFIG, array(
+                        '_trigger' => $trigger,
+                        'id' => $this->sessionID,
+                        'enabled' => false
+                    ));
+                    $result = $db->sql_query($sql);
+                    $db->sql_freeresult($result);
+                } else {
+                    // Data is present, update it instead
+                    $sql = $db->sql_build_update(BURNBOT_COMMANDS_CONFIG, array(
+                        'enabled' => false
+                    ), array(
+                        'id' => $this->sessionID,
+                        '_trigger' => $trigger
+                    ));
+                    $result = $db->sql_query($sql);
+                    $db->sql_freeresult($result);
+                }
+                
+                $this->addMessageToQue("Command $trigger has been disabled");
+                
+                // Now that the database is updated, Re-enable the command by re-running the init and post-init phase of the bot
+                $this->init();
             } else {
-                $this->addMessageToQue("Edit was unable to be performed because there were not enough parameters: " . $this->commandDelimeter . "editcom {trigger} {Ops} {Regulars} {Subs} {Turbo} {output}");
+                // Well, we need to update the DB and run through the command resheller (For modules)
+                $sql = $db->sql_build_select(BURNBOT_COMMANDS_CONFIG, array(
+                    '*'
+                ), array(
+                    'id' => $this->sessionID,
+                    '_trigger' => $trigger
+                ));
+                $result = $db->sql_query($sql);
+                $arr = $db->sql_fetchrow($result);
+                $db->sql_freeresult($result);
+                
+                if (empty($arr))
+                {
+                    // No data, insert time
+                    $sql = $db->sql_build_insert(BURNBOT_COMMANDS_CONFIG, array(
+                        '_trigger' => $trigger,
+                        'id' => $this->sessionID,
+                        'enabled' => true
+                    ));
+                    $result = $db->sql_query($sql);
+                    $db->sql_freeresult($result);
+                } else {
+                    // Data is present, update it instead
+                    $sql = $db->sql_build_update(BURNBOT_COMMANDS_CONFIG, array(
+                        'enabled' => true
+                    ), array(
+                        'id' => $this->sessionID,
+                        '_trigger' => $trigger
+                    ));
+                    $result = $db->sql_query($sql);
+                    $db->sql_freeresult($result);
+                }
+                
+                $this->addMessageToQue("Command $trigger has been enabled");
+                
+                // Now that the database is updated, Re-enable the command by re-running the init and post-init phase of the bot
+                $this->init();
+            }
+        } else {
+            if (array_key_exists($split[0], $this->loadedCommands))
+            {
+                // We are editing a module command's permission
+                $trigger = (isset($split[0])) ? strtolower($split[0]) : null;
+                
+                // Is this command protected?
+                if (($trigger == 'quit'))
+                {
+                    // Command is protected, stop the edit
+                    $this->addMessageToQue("Command trigger $trigger is protected from having permissions edited");
+                    return;
+                }
+                
+                $ops = (isset($split[1])) ? $split[1] : null;
+                $regs = (isset($split[2])) ? $split[2] : null;
+                $subs = (isset($split[3])) ? $split[3] : null;
+                $turbo = (isset($split[4])) ? $split[4] : null;
+                
+                for ($i = 1; $i <= 5; $i++)
+                {
+                    array_shift($split);
+                }                
+
+                // Convert our vars.  Why do I accept to many possible responses?  Who knows
+                $ops = (($ops == 'true') || ($ops == 't') || ($ops == '1') || ($ops == 'yes') || ($ops == 'y')) ? intval(true) : intval(false);
+                $regs = (($regs == 'true') || ($regs == 't') || ($regs == '1') || ($regs == 'yes') || ($regs == 'y')) ? intval(true) : intval(false);
+                $subs = (($subs == 'true') || ($subs == 't') || ($subs == '1') || ($subs == 'yes') || ($subs == 'y')) ? intval(true) : intval(false);
+                $turbo = (($turbo == 'true') || ($turbo == 't') || ($turbo == '1') || ($turbo == 'yes') || ($turbo == 'y')) ? intval(true) : intval(false);                
+
+                // Okay, after all is said and done, we still have an output, This means at least we have something to feed back to the channel
+                $mod = $this->loadedCommands[$trigger][0];
+                $function = $this->loadedCommands[$trigger][1];
+                
+                $this->registerCommads(array($trigger => array($mod, $function, $ops, $regs, $subs, $turbo)));
+                $irc->_log_action("Updating command $trigger with new permissions");
+            } else {
+                // We are editing a user command
+                $command = (isset($split[0])) ? strtolower($split[0]) : null;
+                $ops = (isset($split[1])) ? $split[1] : null;
+                $regs = (isset($split[2])) ? $split[2] : null;
+                $subs = (isset($split[3])) ? $split[3] : null;
+                $turbo = (isset($split[4])) ? $split[4] : null;
+                
+                for ($i = 1; $i <= 5; $i++)
+                {
+                    array_shift($split);
+                }
+                
+                $output = implode(' ', $split);
+                
+                // Convert our vars.  Why do I accept to many possible responses?  Who knows
+                $ops = (($ops == 'true') || ($ops == 't') || ($ops == '1') || ($ops == 'yes') || ($ops == 'y')) ? intval(true) : intval(false);
+                $regs = (($regs == 'true') || ($regs == 't') || ($regs == '1') || ($regs == 'yes') || ($regs == 'y')) ? intval(true) : intval(false);
+                $subs = (($subs == 'true') || ($subs == 't') || ($subs == '1') || ($subs == 'yes') || ($subs == 'y')) ? intval(true) : intval(false);
+                $turbo = (($turbo == 'true') || ($turbo == 't') || ($turbo == '1') || ($turbo == 'yes') || ($turbo == 'y')) ? intval(true) : intval(false);
+                
+                if ($output != '')
+                {
+                    // Okay, after all is said and done, we still have an output, This means at least we have something to feed back to the channel
+                    $commandArr = array('output' => $output, 'ops' => $ops, 'regulars' => $regs, 'subs' => $subs, 'turbo' => $turbo);
+                    $this->editCommand($command, $commandArr);
+                } else {
+                    $this->addMessageToQue("Edit was unable to be performed because there were not enough parameters: " . $this->commandDelimeter . "editcom {trigger} {Ops} {Regulars} {Subs} {Turbo} {output}");
+                }
             }
         }
     }
@@ -1383,7 +1744,7 @@ class burnbot
         
         if (!empty($OPArr) || !empty($regArr) || !empty($subArr) || !empty($comArr))
         {
-            $str = "Currently registered commands: $OPCommands$regCommands$subCommands$commands";
+            $str = "Currently registered commands: $OPCommands$regCommands$subCommands$turboCommands$commands";
             
             // Tack this onto the end if nothing was supplied module wise
             if ($module == '')
@@ -1401,45 +1762,39 @@ class burnbot
     private function burnbot_addreg($sender, $msg = '')
     {
         // This command allows multiple users to be specified by using spaces
-        if (array_key_exists($sender, $this->operators))
+        $split = explode(' ', $msg);
+        
+        // Catch here
+        if (!empty($split))
         {
-            $split = explode(' ', $msg);
-            
-            // Catch here
-            if (!empty($split))
+            foreach ($split as $user)
             {
-                foreach ($split as $user)
-                {
-                    $this->addRegular($user);
-                }
-                
-                $this->addMessageToQue("All users successfully added as regulars");
-            } else {
-                $this->addMessageToQue("ERROR: No users supplied to be added.  Please add usernames separated by spaces after the command triger.");
+                $this->addRegular($user);
             }
+            
+            $this->addMessageToQue("All users successfully added as regulars");
+        } else {
+            $this->addMessageToQue("ERROR: No users supplied to be added.  Please add usernames separated by spaces after the command triger.");
         }
     }
     
     private function burnbot_delreg($sender, $msg = '')
     {
         // This command allows multiple users to be specified by using spaces
-        if (array_key_exists($sender, $this->operators))
+        $split = explode(' ', $msg);
+        
+        // Catch here
+        if (!empty($split))
         {
-            $split = explode(' ', $msg);
-            
-            // Catch here
-            if (!empty($split))
+            foreach ($split as $user)
             {
-                foreach ($split as $user)
-                {
-                    $this->removeRegular($user);
-                }
-                
-                $this->addMessageToQue("All users successfully removed as regulars");
-            } else {
-                $this->addMessageToQue("ERROR: No users supplied to be removed.  Please add usernames separated by spaces after the command triger.");
+                $this->removeRegular($user);
             }
-        }       
+            
+            $this->addMessageToQue("All users successfully removed as regulars");
+        } else {
+            $this->addMessageToQue("ERROR: No users supplied to be removed.  Please add usernames separated by spaces after the command triger.");
+        }
     }
     
     private function burnbot_google($sender, $msg = '')
@@ -1458,73 +1813,27 @@ class burnbot
     
     private function burnbot_userCommand($sender, $trigger)
     {
-        global $db, $twitch, $irc;
+        global $irc;
         
-        $ops = $this->userCommands[$trigger][2];
-        $regs = $this->userCommands[$trigger][3];
-        $subs = $this->userCommands[$trigger][4];
-        $turbo = $this->userCommands[$trigger][5];
         $output = $this->userCommands[$trigger][6];
-        $sendMessage = false;
-        $suppress = false;
-        $allowSend = false;
         
-
-        // Do we have an output for this command at all?
-        if (empty($output))
-        {
-            $irc->_log_error("Command registered as a dud");
-            
-            // Command is a dud, for now, do nothing.
-            return;
-        }
+        $irc->_log_action("Adding message to que: $output");
         
-        // Check the perm layers
-        if ($ops && array_key_exists($sender, $this->operators))
-        {
-            $sendMessage = true;
-        }
-        if ($regs && ((array_key_exists($sender, $this->operators) || array_key_exists($sender, $this->regulars))))
-        {
-            $sendMessage = true;
-        }
-        // Ignore this if not in twitch
-        if (!$this->isTwitch)
-        {
-            if ($subs && (array_key_exists($sender, $this->operators) ||array_key_exists($sender, $this->subscribers)))
-            {
-                $sendMessage = true;
-            }
-            
-            if ($turbo && (array_key_exists($sender, $this->operators) ||array_key_exists($sender, $this->turboUsers)))
-            {
-                $sendMessage = true;
-            }                            
-        }
-
-        // Did we go through all cases and not find a permission?
-        if (!$sendMessage && !$ops && !$regs && (($subs && !$this->isTwitch) || !$subs) && (($turbo && !$this->isTwitch) || !$turbo))
-        {
-            $sendMessage = true;
-        } else {
-            $suppress = true;
-        }
-        
-        // After all checks, it looks like we can add the output to the que
-        if ($sendMessage)
+        // Add the message to the que
+        if ($output != '')
         {
             $this->addMessageToQue($output);
         } else {
-            if (!$suppress)
-            {
-                $this->addMessageToQue("Command was unable to be processed");
-            }
+            $this->addMessageToQue('Command was a dud');
         }
     }
     
     private function burnbot_listops($sender, $msg = '')
     {
         $operators = '';
+        
+        // Quickly sort the array
+        ksort($this->operators);
         
         foreach ($this->operators as $op => $value)
         {
@@ -1540,6 +1849,9 @@ class burnbot
     {
         $regulars = '';
         
+        // Quickly sort the array
+        ksort($this->regulars);
+        
         foreach ($this->regulars as $regular => $value)
         {
             $regulars .= " $regular";
@@ -1547,7 +1859,7 @@ class burnbot
         
         $reg = 'Regulars:' . $regulars;
         
-        $this->addMessageToQue($reg);        
+        $this->addMessageToQue($reg);
     }
     
     private function burnbot_loadedModules($sender, $msg = '')
@@ -1556,7 +1868,7 @@ class burnbot
         
         foreach ($this->loadedModules as $module => $enabled)
         {
-            if ($enabled)
+            if ($enabled == true)
             {
                 $modules .= " $module,";
             }
@@ -1570,34 +1882,150 @@ class burnbot
     
     private function burnbot_memusage($sender, $msg = '')
     {
-        if (array_key_exists($sender, $this->operators))
-        {
-            $raw = memory_get_usage();
-            $mB = round(($raw / 1024.0) / 1024.0, 2);
-            
-            $this->addMessageToQue("Current memory usage: " . $mB . "Mb || RawBytes: $raw");
-        }
+        $raw = memory_get_usage();
+        $mB = round(($raw / 1024.0) / 1024.0, 2);
+        
+        $this->addMessageToQue("Current memory usage: " . $mB . "Mb || RawBytes: $raw");
     }
     
     private function burnbot_limiters($sender, $msg = '')
     {
-        if (array_key_exists($sender, $this->operators))
+        $msg = strtolower($msg);
+        
+        // Check to see if we have a valid option
+        if (($msg == 'true') || ($msg == 't') || ($msg == '1') || ($msg == 'yes') || ($msg == 'y') || ($msg == 'on'))
         {
-            $msg = strtolower($msg);
+            $this->limitSends = true;
+            $this->addMessageToQue("Limiters enabled: Restricting commands to $this->TTLStack messages in $this->TTL seconds");
+        } elseif (($msg == 'false') || ($msg == 'f') || ($msg == '0') || ($msg == 'no') || ($msg == 'n') || ($msg == 'off')) {
+            $this->limitSends = false;
+            $this->addMessageToQue("Limiters removed");                
+        } else {
+            $str = ($this->limitSends) ? "on" : "off";
+            $this->addMessageToQue("No valid option given, limiters retained as: $str");
+        }     
+    }
+    
+    private function burnbot_module($sender, $msg = '')
+    {
+        global $db;
+        
+        $split = explode(' ', $msg);
+        
+        if (array_key_exists($split[0], $this->loadedModules))
+        {
+            $str = ($this->loadedModules[$split[0]]) ? "Module $split[0] is enabled" : "Module $split[0] is disabled";
             
-            // Check to see if we have a valid option
-            if (($msg == 'true') || ($msg == 't') || ($msg == '1') || ($msg == 'yes') || ($msg == 'y') || ($msg == 'on'))
+            $this->addMessageToQue($str);
+            
+            return;
+        } else {
+            // We might be editing a module
+            
+            if (!isset($split[1]) || ($split[1] == ''))
             {
-                $this->limitSends = true;
-                $this->addMessageToQue("Limiters enabled: Restricting commands to $this->TTLStack messages in $this->TTL seconds");
-            } elseif (($msg == 'false') || ($msg == 'f') || ($msg == '0') || ($msg == 'no') || ($msg == 'n') || ($msg == 'off')) {
-                $this->limitSends = false;
-                $this->addMessageToQue("Limiters removed");                
-            } else {
-                $str = ($this->limitSends) ? "on" : "off";
-                $this->addMessageToQue("No valid option given, limiters retained as: $str");
+                $this->addMessageToQue("Please specify a module to change");
+                return;
             }
-        }        
+            
+            // Before we even run any of the code for disabling a module, be sure we are not trying to disable core or user
+            if (($split[1] == 'core') || ($split[1] == 'user'))
+            {
+                $this->addMessageToQue("Module $split[1] is protected.  You may not change this module's state");
+                return;
+            }
+            
+            if (($split[0] == 'enable') || ($split[0] == 'disable'))
+            {
+                if ($split[0] == 'enable')
+                {
+                    // Run the SQL first
+                    $sql = $db->sql_build_select(BURNBOT_MODULES_CONFIG, array(
+                        'enabled'
+                    ), array(
+                        'id' => $this->sessionID,
+                        'module' => $split[1],
+                    ));
+                    $result = $db->sql_query($sql);
+                    $row = $db->sql_fetchrow($result);
+                    $db->sql_freeresult($result);
+                    
+                    // Did we get data?
+                    if (isset($row['enabled']))
+                    {
+                        // Update the row
+                        $sql = $db->sql_build_update(BURNBOT_MODULES_CONFIG, array(
+                            'enabled' => true
+                        ), array(
+                            'id' => $this->sessionID,
+                            'module' => $split[1],                            
+                        ));
+                        $result = $db->sql_query($sql);
+                        $db->sql_freeresult($result);
+                        
+                    } else {
+                        // insert the new config
+                        $sql = $db->sql_build_insert(BURNBOT_MODULES_CONFIG, array(
+                            'enabled' => true,
+                            'id' => $this->sessionID,
+                            'module' => $split[1]
+                        ));
+                        $result = $db->sql_query($sql);
+                        $db->sql_freeresult($result);
+                    }
+                    
+                    // Enable the module
+                    $this->loadedModules[$split[1]] = true;
+                    $this->addMessageToQue("Module $split[1] has been enabled");
+                    
+                    // Reload its commands too, unfortunately this forces us to go through the init phase again
+                    $this->init();
+                } else {
+                    $sql = $db->sql_build_select(BURNBOT_MODULES_CONFIG, array(
+                        'enabled'
+                    ), array(
+                        'id' => $this->sessionID,
+                        'module' => $split[1],
+                    ));
+                    $result = $db->sql_query($sql);
+                    $row = $db->sql_fetchrow($result);
+                    $db->sql_freeresult($result);
+                    
+                    // Did we get data?
+                    if (isset($row['enabled']))
+                    {
+                        // Update the row
+                        $sql = $db->sql_build_update(BURNBOT_MODULES_CONFIG, array(
+                            'enabled' => false
+                        ), array(
+                            'id' => $this->sessionID,
+                            'module' => $split[1],                            
+                        ));
+                        $result = $db->sql_query($sql);
+                        $db->sql_freeresult($result);
+                        
+                    } else {
+                        // insert the new config
+                        $sql = $db->sql_build_insert(BURNBOT_MODULES_CONFIG, array(
+                            'enabled' => false,
+                            'id' => $this->sessionID,
+                            'module' => $split[1]
+                        ));
+                        $result = $db->sql_query($sql);
+                        $db->sql_freeresult($result);
+                    }
+                    
+                    // Pass off to the unregister
+                    $this->unregisterModule($split[1]);
+                    $this->addMessageToQue("Module $split[1] has been disabled");
+                }
+                
+                return;
+            }
+        }
+        
+        // If we reached here, syntax was bad
+        $this->addMessageToQue("To check the status of a module, add the module name after the command trigger.  To edit the state of a module, please use the following syntax: " . $this->commandDelimeter . "module {enable/disable} {module}");
     }
     
     /**

@@ -178,15 +178,15 @@ class db
     }			
 
     
-    public function sql_build_update($table, $insert, $conditions = array())
+    public function sql_build_update($table, $update, $conditions = array())
     {
         // Start by breaking down the array of parameters
         $set = '';
         $condition = '';
         
-        foreach ($insert as $collumn => $value)
+        foreach ($update as $collumn => $value)
         {
-            $set .= $this->sql_escape($collumn) . "='" . $this->sql_escape($value) . "',";
+            $set .= $this->sql_escape($collumn) . "=" . $this->sql_validate_value($value) . ",";
         }
         
         $set = rtrim($set, ',');
@@ -201,13 +201,70 @@ class db
                     $condition .= ' AND ';
                 }
                 
-                $condition .= $this->sql_escape($collumn) . "='" . $this->sql_escape($value) . "'";
+                $condition .= $this->sql_escape($collumn) . "=" . $this->sql_validate_value($value) . "";
             }
         }
         
         // Build the query and return it
         $sql = ($condition != '') ? "UPDATE " . $this->sql_escape($table) . " SET $set WHERE $condition;" : "UPDATE " . $this->sql_escape($table) . " SET $set;";
         
+        return $sql;
+    }
+    
+    public function sql_build_select($table, $select, $conditions = array())
+    {
+        // Start by breaking down the array of parameters
+        $selectStr = '';
+        $condition = '';
+        
+        foreach ($select as $collumn)
+        {
+            $selectStr .= $this->sql_escape($collumn) . ',';
+        }
+        
+        $selectStr = rtrim($selectStr, ',');
+        
+        if (!empty($conditions))
+        {
+            foreach ($conditions as $collumn => $value)
+            {
+                // Cheap way of getting the AND in there
+                if ($condition != '')
+                {
+                    $condition .= ' AND ';
+                }
+                
+                $condition .= $this->sql_escape($collumn) . "=" . $this->sql_validate_value($value) . "";
+            }
+        }
+        
+        // Build and return
+        $sql = ($condition != '') ? "SELECT $selectStr FROM "  . $this->sql_escape($table) . " WHERE $condition;" : "SELECT $selectStr FROM "  . $this->sql_escape($table) . ";" ;
+
+        return $sql;
+    }
+    
+    public function sql_build_delete($table, $conditions = array())
+    {
+        $condition = '';
+        
+        if (!empty($conditions))
+        {
+            foreach ($conditions as $collumn => $value)
+            {
+                // Cheap way of getting the AND in there
+                if ($condition != '')
+                {
+                    $condition .= ' AND ';
+                }
+                
+                $condition .= $this->sql_escape($collumn) . "=" . $this->sql_validate_value($value) . "";
+            }
+        }
+        
+        // Build and return
+        $sql = ($condition != '') ? "DELETE FROM "  . $this->sql_escape($table) . " WHERE $condition;" : "DELETE FROM "  . $this->sql_escape($table) . ";" ;
+
         return $sql;
     }
     

@@ -56,6 +56,17 @@ require('./irc_logger.php');
 $irc = new irc_logger;
 $irc->_log_action('IRC module loaded');
 
+// Include our DB module
+require('./db.php');
+$db = new db;
+$irc->_log_action('Database module loaded');
+
+// Set our DB link
+$db->sql_connect($sqlHost, $sqlUser, $sqlPass, $sqlDB, $sqlPort, false, true);
+
+// unset the password since we won't need it anymore
+unset($sqlPass);
+
 // Now all of our logic from the actual bot file itself
 require('./burnbot.php');
 $burnBot = new burnbot;
@@ -97,20 +108,6 @@ require('./spotify.php');
 $spotify = new spotify;
 $irc->_log_action('Spotify module loaded');
 
-// Include our DB module
-require('./db.php');
-$db = new db;
-$irc->_log_action('Database module loaded');
-
-// Set our DB link
-$db->sql_connect($sqlHost, $sqlUser, $sqlPass, $sqlDB, $sqlPort, false, true);
-
-// unset the password since we won't need it anymore
-unset($sqlPass);
-
-$sql = 'DELETE FROM ' . BURNBOT_COMMANDS . ' WHERE id=\'0\'';
-$result = $db->sql_query($sql);
-
 // Startup
 $irc->_log_action("Creating socket connection for [$host:$port]");
 $socket = $irc->connect($host, $port);
@@ -136,7 +133,7 @@ primaryLoop();
 if ($burnBot->reconnect)
 {
     // We will only connect 5 times to a channel.  In the future, we will use DB and a controller process to start new bot sessions
-    for ($i = 1; $i < $burnBot->getCounter(); $i++)
+    for ($i = 1; $i < $burnBot->getReconnectCounter(); $i++)
     {
         $connected = $burnBot->reconnect();
         

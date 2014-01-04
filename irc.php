@@ -119,16 +119,29 @@ class irc
                 
                 // Set the fields
                 $command = $words[0];
-                $user = $words[1];
-                $value = rtrim(trim($words[2], '['), ']');
                 
-                // Build the array
-                $messageArr = array(
-                    'type' => $type,
-                    'command' => $command,
-                    'user' => $user,
-                    'value' => $value
-                );
+                if (isset($words[2]))
+                {
+                    $user = $words[1];
+                    $value = rtrim(trim($words[2], '['), ']');
+
+                    // Build the array
+                    $messageArr = array(
+                        'type' => $type,
+                        'command' => $command,
+                        'user' => $user,
+                        'value' => $value
+                    );
+                } else {
+                    $user = $words[1];
+
+                    // Build the array
+                    $messageArr = array(
+                        'type' => $type,
+                        'command' => $command,
+                        'user' => $user
+                    );                    
+                }
             }
             
             return $messageArr;
