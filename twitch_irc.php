@@ -27,7 +27,7 @@ class twitch_irc extends twitch
     
     var $game = '';
     var $lastGamePull = 0;
-    var $gameTTL = 0;
+    var $gameTTL = 300;
     
     function __construct()
     {
@@ -83,56 +83,68 @@ class twitch_irc extends twitch
             $db->sql_freeresult($result);
         }
         
-        // Now do some checks to see if we have a code or a code/token set for this ID
-        $sql = $db->sql_build_select(BURNBOT_TWITCHCODES, array(
-            'code',
-            'token'
-        ), array(
-            'id' => $this->sessionID
-        ));
-        $result = $db->sql_query($sql);
-        $row = $db->sql_fetchrow($result);
-        $db->sql_freeresult($result);        
-        
-        if (!empty($row))
-        {
-            // Set our token into our array
-            if (!isset($row['token']) || ($row['token'] == ''))
-            {
-                // No token available, generate one (Assume token is good, we will supply a code as a fallback)
-                $this->token = $this->generateToken($row['code']);
-            } else {
-                $this->token = $row['token'];
-            }
-            
-            $this->code = $row['code'];
-        } else {
-            // Disable our update commands, we have no need for them since they will never work anyway
-            $this->tokenAvailable = false;
-        }
-        
         $irc->_log_action("Twitch environment constructed");
     }
     
     public function init()
     {
-        global $burnBot;
+        global $burnBot, $db, $irc, $twitch_clientKey, $twitch_clientSecret, $twitch_clientUrl, $updapeClientSecret, $updateClientKey, $updateClientURI;
+        
+        if (($this->token == '') && $this->tokenAvailable)
+        {
+            // Update to our update servicer
+            $twitch_clientKey = $updateClientKey;
+            $twitch_clientSecret = $updapeClientSecret;
+            $twitch_clientUrl = $updateClientURI;
+            
+            // This is done in init because here is no way of delaying this to work AFTER password generation otherwise
+            $sql = $db->sql_build_select(BURNBOT_TWITCHCODES, array(
+                'code',
+                'token'
+            ), array(
+                'id' => $this->sessionID
+            ));
+            $result = $db->sql_query($sql);
+            $row = $db->sql_fetchrow($result);
+            $db->sql_freeresult($result);
+            
+            if (!empty($row))
+            {
+                // Set our token into our array
+                if (!isset($row['token']) || ($row['token'] == ''))
+                {
+                    // No token available, generate one (Assume token is good, we will supply a code as a fallback)
+                    $this->token = $this->generateToken($row['code']);
+                } else {
+                    $this->token = $row['token'];
+                }
+                
+                $this->code = $row['code'];
+            } else {
+                // Disable our update commands, we have no need for them since they will never work anyway
+                $irc->_log_error("Unable to grab a token for this session, please use the following to generate an AUTH code: " . $this->generateAuthorizationURL(array('channel_editor')));
+                $this->tokenAvailable = false;
+            }
+        }
         
         // Prune any commands from our array that we don't have any credentials for
-        unset($this->commands['twitch_updatetitle'], $this->commands['twitch_updategame']);
+        if (!$this->tokenAvailable)
+        {
+            unset($this->commands['twitch_updatetitle'], $this->commands['twitch_updategame']);
+        }
         
         // And register all commands
         $burnBot->registerCommads($this->commands);
     }
     
-    private function twitch_game($sender, $msg = '')
+    public function twitch_game($sender, $msg = '')
     {
         global $burnBot;
         
         // Do we need to grab the title?
-        if (($this->lastGamePull + $this->gameTTL) < time())
+        if ((($this->lastGamePull + $this->gameTTL) < time()) || ($this->game == ''))
         {
-            $arr = $this->getStreamObject($this->chan);
+            $arr = $this->getStreamObject(trim($this->chan, '#'));
             
             if ($arr != null)
             {
@@ -147,17 +159,25 @@ class twitch_irc extends twitch
             }
             
             // At this point, we should have a game.  Check the config and build the message
-            $gameURL = urlencode($this->game);
+            $gameURL = preg_replace('[ ]', '%20', $this->game);
             $gfsAcc = $this->config['gfs'];
             $gfs = ($this->config['gfs_enabled']) ? "You can get it here on GameFanShop! http://www.gamefanshop.com/partner-$gfsAcc/search-$gameURL. " : '' ;
             $steam = ($this->config['steam_enabled']) ? "You can buy it here on Steam! http://store.steampowered.com/search/?term=$gameURL." : '';
             
-            $str = "Currently playing: $game. $gfs$steam";
+            $str = "Currently playing: $this->game. $gfs$steam";
             $burnBot->addMessageToQue($str);
+        } else {
+            // At this point, we should have a game.  Check the config and build the message
+            $gameURL = urlencode($this->game);
+            $gfsAcc = $this->config['gfs'];
+            $gfs = ($this->config['gfs_enabled']) ? "You can get it here on GameFanShop! http://www.gamefanshop.com/partner-$gfsAcc/search/$gameURL. " : '' ;
+            $steam = ($this->config['steam_enabled']) ? "You can buy it here on Steam! http://store.steampowered.com/search/?term=$gameURL." : '';
+            
+            $str = "Currently playing: $this->game. $gfs$steam";
         }
     }
     
-    private function twitch_steam($sender, $msg = '')
+    public function twitch_steam($sender, $msg = '')
     {
         global $burnBot, $db;
         
@@ -185,7 +205,7 @@ class twitch_irc extends twitch
         }
     }
     
-    private function twitch_gfs($sender, $msg = '')
+    public function twitch_gfs($sender, $msg = '')
     {
         global $burnBot, $db;
         
@@ -199,7 +219,7 @@ class twitch_irc extends twitch
                 // We are enabling or disabling it, enabling may also have the account name attached
                 if ($split[0] == 'enable')
                 {
-                    $account = (isset($split[1])) ? $split[1] : '';
+                    $account = (isset($split[1]) && ($split[1] != '')) ? $split[1] : $this->config['gfs'];
                     
                     // Update our DB now
                     $sql = $db->sql_build_update(BURNBOT_TWITCHCONFIG, array(
@@ -214,11 +234,13 @@ class twitch_irc extends twitch
                     // Update the config
                     $this->config['gfs_enabled'] = true;
                     $this->config['gfs'] = $account;
+                    
+                    $str = (isset($split[1]) && ($split[1] != '')) ? "Updated GameFanShop listing to be enabled and to have account $account" : "Updated GameFanShop listing to be enabled";
+                    $burnBot->addMessageToQue($str);
                 } else {
                     // Assume disable here
                     $sql = $db->sql_build_update(BURNBOT_TWITCHCONFIG, array(
                         'gfs_enabled' => false,
-                        'gfs' => $account
                     ), array(
                         'id' => $this->sessionID
                     ));
@@ -227,6 +249,8 @@ class twitch_irc extends twitch
                     
                     // Update the config
                     $this->config['gfs_enabled'] = false;
+                    
+                    $burnBot->addMessageToQue("Update GameFanShip listing to be disabled");
                 }
             } else {
                 // Only updating the account
@@ -243,13 +267,15 @@ class twitch_irc extends twitch
                 
                 // Update the config
                 $this->config['gfs'] = $account;
+                
+                $burnBot->addMessageToQue("Account updated to $account");
             }
         } else {
             $burnBot->addMessageToQue("Please provide a setting for the GameFanShop partnership store search");
         }        
     }
     
-    private function twitch_updatetitle($sender, $msg = '')
+    public function twitch_updatetitle($sender, $msg = '')
     {
         global $burnBot;
         
@@ -264,7 +290,7 @@ class twitch_irc extends twitch
         }
     }
     
-    private function twitch_updategame($sender, $msg = '')
+    public function twitch_updategame($sender, $msg = '')
     {
         global $burnBot;
         

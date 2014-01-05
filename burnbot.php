@@ -1099,6 +1099,11 @@ class burnbot
                                             
                                             break;
                                             
+                                        case 'twitch':
+                                            $twitch->{$info[1]}($sender, $msg);
+                                            
+                                            break;
+                                            
                                         default:
                                             // The command isn't defined properly, drop an error into the log and pass out to the chat as well
                                             $irc->_log_error("Error attempting to run command $trigger.  No information array provided");
@@ -1357,7 +1362,7 @@ class burnbot
     // Callback functions for commands
     private function burnbot_version($sender, $msg = '')
     {
-        $this->addMessageToQue("@$sender: Current version is $this->version.  Get it over at https://github.com/IBurn36360/PHP_BurnBot");
+        $this->addMessageToQue("@$sender: Current version is V$this->version.  Get it over at https://github.com/IBurn36360/PHP_BurnBot");
     }
     
     private function burnbot_contact($sender, $msg = '')
@@ -1433,12 +1438,12 @@ class burnbot
     {
         global $db, $irc;
         
-        $split = explode(' ', $msg);
+        $split = explode(' ', strtolower($msg));
         
         if (($split[0] == 'enable') || ($split[0] == 'disable'))
         {
             $state = $split[0];
-            $trigger = (isset($split[1])) ? $trigger : false ;
+            $trigger = (isset($split[1])) ? $split[1] : false ;
             
             // check for a protected command
             if (($trigger == 'quit') || ($trigger == 'editcom') || ($trigger == 'module'))
@@ -1744,7 +1749,7 @@ class burnbot
         
         if (!empty($OPArr) || !empty($regArr) || !empty($subArr) || !empty($comArr))
         {
-            $str = "Currently registered commands: $OPCommands$regCommands$subCommands$turboCommands$commands";
+            $str = "Currently registered commands: " . rtrim("$OPCommands$regCommands$subCommands$turboCommands$commands", ', ');
             
             // Tack this onto the end if nothing was supplied module wise
             if ($module == '')
