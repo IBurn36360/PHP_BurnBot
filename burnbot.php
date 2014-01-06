@@ -270,7 +270,7 @@ class burnbot
         if ($this->isTwitch)
         {
             // Disable some commands while on Twitch specifically
-            unset($commands['nick'], $commands['limiters']);
+            unset($commands['nick'], $commands['limiters'], $commands['listreg']);
         } else {
             // In standard channels, we disable regulars since we can rely on modes
             unset($commands['addreg'], $commands['delreg']);
@@ -442,6 +442,10 @@ class burnbot
     public function getSessionID()
     {
         return $this->sessionID;
+    }
+    public function getCommandDelimeter()
+    {
+        return $this->commandDelimeter;
     }
     
     // Registers
@@ -1575,7 +1579,7 @@ class burnbot
                 $function = $this->loadedCommands[$trigger][1];
                 
                 $this->registerCommads(array($trigger => array($mod, $function, $ops, $regs, $subs, $turbo)));
-                $irc->_log_action("Updating command $trigger with new permissions");
+                $this->addMessageToQue("Updated command $trigger with new permissions");
             } else {
                 // We are editing a user command
                 $command = (isset($split[0])) ? strtolower($split[0]) : null;
@@ -2033,12 +2037,143 @@ class burnbot
         $this->addMessageToQue("To check the status of a module, add the module name after the command trigger.  To edit the state of a module, please use the following syntax: " . $this->commandDelimeter . "module {enable/disable} {module}");
     }
     
-    /**
-     * @todo extend this to parse module help messages
-     */ 
     private function burnbot_help($sender, $msg = '')
     {
-        $this->addMessageToQue("@$sender: For a list of commands, please use the command " . $this->commandDelimeter . "listcom");
+        global $twitch, $reminders;
+        
+        // Nothing was provided, provide the syntax
+        if ($msg == '')
+        {
+            $this->addMessageToQue("@$sender: To get help for a module, please use the following syntax: " . $this->commandDelimeter . "help {module}.  To get help for a command, please use the following syntax: " . $this->commandDelimeter . 'help {module} {command Trigger}.');
+            return;
+        }
+        
+        $parts = explode(' ', $msg);
+        $module = $parts[0];
+        $trigger = isset($parts[1]) ? $parts[1] : false;
+        
+        // Switch through the modules
+        switch ($module)
+        {
+            case 'user':
+                $this->addMessageToQue('[Protected] This module is an extension of core and handles all user defined triggers.  This module can not be disabled');
+                break;
+            
+            case 'core':
+                if ($trigger != false)
+                {
+                    // Don't switch if the command is not registered
+                    if (!array_key_exists($trigger, $this->loadedCommands))
+                    {
+                        $this->addMessageToQue('The specified command either is currently disabled or does not exist');
+                        return;
+                    }
+                    
+                    // Attempt to grab command info
+                    switch ($trigger)
+                    {
+                        case 'addcom':
+                            $this->addMessageToQue('Usage: ' . $this->commandDelimeter . 'addcom {Trigger} {Output}.  Adds a new command to the user module.  Output may be any number of characters up to 512');
+                            break;
+                            
+                        case 'delcom':
+                            $this->addMessageToQue('Usage: ' . $this->commandDelimeter . 'delcom {trigger}. Deletes a command trigger from the database and unregisters it from the bot');
+                            break;
+                            
+                        case 'editcom':
+                            $this->addMessageToQue('Usage: [module core] ' . $this->commandDelimeter . 'editcom {enable/disable} {Trigger}. Enables or disables a command outside of the user module. Usage: [module core] ' . $this->commandDelimeter . 'editcom {trigger} {Op} {Reg} {Sub} {Turbo}. Edits the permission layers of a command outside of the user module. Usage: [module user] ' . $this->commandDelimeter . 'editcom {trigger} {Op} {Regs} {Subs} {Turbo} {Output}. Edits the permission layers and output of a user command');
+                            break;
+                            
+                        case 'addreg':
+                            $this->addMessageToQue('Usage: ' . $this->commandDelimeter . 'addreg {username} {username} ...  Adds all listed usernames as regulars into the database.  All usernames are separated by spaces');
+                            break;
+                            
+                        case 'delreg':
+                            $this->addMessageToQue('Usage: ' . $this->commandDelimeter . 'delreg {username} {username} ...  Removes all listed usernames from being regulars in the database.  All usernames are separated by spaces');
+                            break;
+                            
+                        case 'limiters':
+                            $this->addMessageToQue('Usage: ' . $this->commandDelimeter . 'limiters {enable/disable}.  Enables or disables the TTL limitations on the bot.  Limits the rate at which messages can be sent');
+                            break;
+                            
+                        case 'listops':
+                            $this->addMessageToQue('Usage: ' . $this->commandDelimeter . 'listops.  Lists all currently recognized operators.');
+                            break;
+                            
+                        case 'listreg':
+                            $this->addMessageToQue('Usage: ' . $this->commandDelimeter . 'listops.  Lists all currently recognized regulars.');
+                            break;
+                            
+                        case 'memusage':
+                            $this->addMessageToQue('Usage: ' . $this->commandDelimeter . 'memusage.  Lists the current memory allocated to the bot.  Does not account for the HTTPD server');
+                            break;
+                            
+                        case 'module':
+                            $this->addMessageToQue('Usage: ' . $this->commandDelimeter . 'module {module}.  Lists the state of a module.  Usage: ' . $this->commandDelimeter . 'module {enable/disable} {module}.  Enables and re-registers all commands or disables and unregisters all commands');
+                            break;
+                            
+                        case 'modules':
+                            $this->addMessageToQue('Usage: ' . $this->commandDelimeter . 'modules.  Lists all currently enabled modules');
+                            break;
+                            
+                        case 'nick':
+                            $this->addMessageToQue('Usage: ' . $this->commandDelimeter . 'nick {nick}.  Changes the nickname of the bot');
+                            break;
+                            
+                        case 'quit':
+                            $this->addMessageToQue('Usage: ' . $this->commandDelimeter . 'quit {Override}.  Forces the bot to disconnect.  On Twitch, will only respond to the caster');
+                            break;
+                            
+                        case 'google':
+                            $this->addMessageToQue('Usage: ' . $this->commandDelimeter . 'google {query}.  Sets up a Let me Google That For You link');
+                            break;
+                            
+                        case 'listcom':
+                            $this->addMessageToQue('Usage: ' . $this->commandDelimeter . 'listcom {module}.  Lists the commands registered to a module.  If no module is specified, will list all commands');
+                            break;
+                            
+                        case 'slap':
+                            $this->addMessageToQue('Usage: ' . $this->commandDelimeter . 'slap {target} {string}.  Performs an action to slap the target with the provided string after if one is provided');
+                            break;
+                            
+                        case 'contact':
+                            $this->addMessageToQue('Usage: ' . $this->commandDelimeter . 'contact.  Displays the contact information of the current developer');
+                            break;
+                            
+                        case 'version':
+                            $this->addMessageToQue('usage: ' . $this->commandDelimeter . 'version.  Displays current version and links to the project page');
+                            break;
+                        
+                        // The trigger isn't part of core, tell the user
+                        default:
+                            $this->addMessageToQue('The command specified is not part of module core');
+                            break;
+                    }                    
+                } else {
+                    // Parse out the help for the module
+                    $this->addMessageToQue('[Protected] This module houses all core function of the bot.  This also include the user module.  This module can not be disabled');
+                }
+
+                break;
+            
+            case 'twitch':
+                if (array_key_exists($module, $this->loadedModules) && $this->loadedModules[$module])
+                {
+                    $twitch->help($trigger);
+                    break;                    
+                }
+            
+            case 'reminders':
+                if (array_key_exists($module, $this->loadedModules) && $this->loadedModules[$module])
+                {
+                    $reminders->help($trigger);
+                    break;                    
+                }
+            
+            default:
+                $this->addMessageToQue('The specified module is not currently active or does not exist');
+                break;
+        }
     }
 }
 ?>

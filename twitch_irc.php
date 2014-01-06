@@ -18,6 +18,7 @@ class twitch_irc extends twitch
     var $isTwitch = false;
     var $config = array();
     var $sessionID = 0;
+    var $commandDelimeter = '';
     
     var $tokenAvailable = true;
     
@@ -37,6 +38,7 @@ class twitch_irc extends twitch
         $this->isTwitch = ($burnBot->getIsTwitch()) ? true : false;
         $this->sessionID = $burnBot->getSessionID();
         $this->chan = $burnBot->getChan();
+        $this->commandDelimeter = $burnBot->getCommandDelimeter();
         
         // Register the module
         if ($this->isTwitch)
@@ -303,6 +305,43 @@ class twitch_irc extends twitch
         } else {
             $burnBot->addMessageToQue("There was an error updating your game");
         }        
+    }
+    
+    public function help($trigger)
+    {
+        global $burnBot;
+        
+        if ($trigger != false)
+        {
+            switch ($trigger)
+            {
+                case 'game';
+                    $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'game.  Checks for that streams currently played game if available and will link any enabled searches.  Will only check every ' . $this->gameTTL . ' seconds for an updated game');
+                    break;
+                    
+                case 'game_gfs';
+                    $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'game_gfs enable {account}.  Turns on the GameFanShop listing after the game command is run and adds the account if provided.  Usage: ' . $this->commandDelimeter . 'game_gfs {enable/diable}.  Enables or disables the GameFanShop link when the game command is run.  Usage: ' . $this->commandDelimeter . 'game_gfs {account}.  Updates the GameFanShip linking to use the provided account');
+                    break;
+                    
+                case 'game_steam';
+                    $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'game_steam {enable/disable}.  Enables or disables steam sarch links when the game command is run');
+                    break;
+                
+                case 'twitch_updatetitle';
+                    $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'twitch_updatetitle {game}.  Updates your current title to the one specified');
+                    break;
+                    
+                case 'twitch_updategame';
+                    $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'twitch_updategame {game}.  Updates your current game to the one specified');
+                    break;
+                
+                default:
+                    $burnBot->addMessageToQue('The command specified is not part of module twitch');
+                    break;
+            }
+        } else {
+            $burnBot->addMessageToQue('This module handles all interaction with twitch.tv in particular.  Can be disabled and is disabled by default on all non-twitch chats');
+        }
     }
 }
 ?>
