@@ -186,7 +186,7 @@ class burnbot
     {
       global $socket;
         
-        $irc->_write($socket, 'QUIT :Ping timeout (180 seconds)');
+        $irc->_write($socket, 'QUIT :Ping timeout (250 seconds)');
         
         usleep(500000);
         $irc->disconnect($socket);
@@ -1010,6 +1010,19 @@ class burnbot
                     return; // !IMPORTANT, Stop ANY other checks in read for this check.  The recursive call to this function will handle the message.
                 }
                 
+                // We have an error to handle
+                if (isset($messageArr['isError']))
+                {
+                    // Check what error
+                    
+                    // Link closed
+                    if ($messageArr['detail'] == 'link_closed')
+                    {
+                        // Exit out
+                        $this->exitHandler();
+                    }
+                }
+                
                 // We have a numbered service ID instead at this point.  We only handle a few of these and will drop the rest
                 if (isset($messageArr['service_id']))
                 {
@@ -1033,6 +1046,16 @@ class burnbot
                             // Lastly, change our read limiter to where it should be
                             $this->tickLimiter = $this->tickLimiterPostJoin;
                         }
+                    }
+                    
+                    // Was our nick already in use?
+                    if ($messageArr['service_id'] == '433')
+                    {
+                        $this->nick = $this->nick . '_';
+                        
+                        // Once our nick has been changed, reauth to the server
+                        $this->hasAuthd = false;
+                        $this->auth();
                     }
                     
                     // We have a default mode, now we may JOIN
@@ -1316,7 +1339,7 @@ class burnbot
     // The loop we run for the bot
     public function tick()
     {
-        global $irc;
+        global $irc, $reminders;
         
         // First get the time that this cycle started
         $this->tickStartTime = microtime(true);
@@ -1329,11 +1352,18 @@ class burnbot
         }
         
         $this->_read();
+        
+        // Run reminders' tick operation if it is enabled
+        if (array_key_exists('reminders', $this->loadedModules) && $this->loadedModules['reminders'])
+        {
+            $reminders->tick();
+        }
+        
         $this->processTTL();
         $this->processQue();
         
         // Are we going to time our peer out at this point?
-        if ((($this->lastPongTime + 180) <= $ping) && ($this->lastPongTime !== 0))
+        if ((($this->lastPongTime + 250) <= $ping) && ($this->lastPongTime !== 0))
         {
             // We might not have AUTH'd and JOIN'd yet, so don't disconnect in that case
             if ($this->hasJoined)
@@ -1409,6 +1439,9 @@ class burnbot
         global $irc, $socket;
         
         $nick = $msg;
+        
+        // update our global
+        $this->nick = $nick;
 
         // Nick is handled by Edge, no need to stack the command
         $irc->_write($socket, "NICK $nick");

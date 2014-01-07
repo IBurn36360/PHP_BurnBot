@@ -218,7 +218,12 @@ class irc
                          // Set all of the data for this type of message
                         $nick = $split[2];
                         $chan = $split[4];
-                        array_shift($split);array_shift($split);array_shift($split);array_shift($split);array_shift($split);
+                        
+                        for ($i = 1; $i <= 5; $i++)
+                        {
+                            array_shift($split);
+                        }
+                        
                         $words = trim(implode(' ', $split), ':');
                         
                         // Build the array
@@ -246,6 +251,14 @@ class irc
                         );
                     
                         break;
+                        
+                    // Nick already in use (No information other than this is needed)
+                    case '433':
+                        $messageArr = array(
+                            'type' => $type,
+                            'service_id' => $serviceID
+                        );
+                        break;
                     
                     default: // We don't know this service ID.  It may be put in in a future update
                         break;
@@ -254,6 +267,25 @@ class irc
                 return $messageArr;
             } else {
                 // We have no service ID.  Time to look for a command
+                
+                // Errors
+                if (preg_match('[error]i', $message) != 0)
+                {
+                    // Link closed (For some reason the socket was closed, be sure to pass to an exit handler in this case)
+                    if (preg_match('[Closing Link]i', $message) != 0)
+                    {
+                        $messageArr = array(
+                            'type' => $type,
+                            'isError' => true,
+                            'detail' => 'link_closed'
+                        );
+                        
+                        return $messageArr;
+                    }
+                    
+                    // Unhandled error, pass an empty array back
+                    return $messageArr;
+                }
                 
                 // Start with MODE
                 if (preg_match('[mode]i', $message) != 0)
