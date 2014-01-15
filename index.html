@@ -8,7 +8,7 @@
 <table>
     <tr>
         <td>Host:</td>
-        <td><input type="text" name="host" /></td>
+        <td><input type="text" name="host" required /></td>
     </tr>
     <tr>
         <td>Port:</td>
@@ -16,19 +16,19 @@
     </tr>
     <tr>
         <td>Channel:</td>
-        <td><input type="text" name="chan" /></td>
+        <td><input type="text" name="chan" required /></td>
     </tr>
     <tr>
         <td>Nickname:</td>
-        <td><input type="text" name="nick" /></td>
+        <td><input type="text" name="nick" required /></td>
     </tr>
     <tr>
         <td>Password:</td>
-        <td><input type="text" name="pass" /></td>
+        <td><input name="pass" type="password" /></td>
     </tr>
     <tr>
         <td>Reconnect on DC:</td>
-        <td><input type="checkbox" name="persist" /></td>
+        <td>Yes: <input type="radio" name="persist" value="1" required />No: <input type="radio" name="persist" value="0" /></td>
     </tr>
 </table>
 

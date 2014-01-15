@@ -12,7 +12,8 @@ class twitch_irc extends twitch
         'game_steam' => array('twitch', 'twitch_steam', true, false, false, false),
         'game_gfs' => array('twitch', 'twitch_gfs', true, false, false, false),
         'twitch_updatetitle' => array('twitch', 'twitch_updatetitle', true, false, false, false),
-        'twitch_updategame' => array('twitch', 'twitch_updategame', true, false, false, false)
+        'twitch_updategame' => array('twitch', 'twitch_updategame', true, false, false, false),
+        'twitch_welcomesubs' => array('twitch', 'twitch_welcomesubs', true, false, false, false)
     );
     
     var $isTwitch = false;
@@ -53,7 +54,9 @@ class twitch_irc extends twitch
         $sql = $db->sql_build_select(BURNBOT_TWITCHCONFIG, array(
             'gfs_enabled',
             'gfs',
-            'steam_enabled'
+            'steam_enabled',
+            'welcome_enabled',
+            'welcome'
         ), array(
             'id' => $this->sessionID
         ));
@@ -66,12 +69,15 @@ class twitch_irc extends twitch
             // Bool out some data here
             $gfs = ($row['gfs_enabled'] == 1) ? true : false;
             $steam = ($row['steam_enabled'] == 1) ? true : false;
+            $welcome = ($row['welcome_enabled'] == 1) ? true : false;
             
             // Construct our config array
             $this->config = array(
                 'gfs_enabled' => $gfs,
                 'steam_enabled' => $steam,
                 'gfs' => $row['gfs'],
+                'welcome_enabled' => $welcome,
+                'welcome' => $row['welcome']
             );
         } else {
             // Create a row here to save us some time and checks later
@@ -79,10 +85,21 @@ class twitch_irc extends twitch
                 'id' => $this->sessionID,
                 'gfs_enabled' => false,
                 'steam_enabled' => false,
-                'gfs' => ''
+                'gfs' => '',
+                'welcome_enabled' => false,
+                'welcome' => ''
             ));
             $result = $db->sql_query($sql);
             $db->sql_freeresult($result);
+            
+            // Construct our config array
+            $this->config = array(
+                'gfs_enabled' => false,
+                'steam_enabled' => false,
+                'gfs' => '',
+                'welcome_enabled' => false,
+                'welcome' => 'Welcome to the channel and thank you for showing your support!'
+            );
         }
         
         $irc->_log_action("Twitch environment constructed");
@@ -137,6 +154,26 @@ class twitch_irc extends twitch
         
         // And register all commands
         $burnBot->registerCommads($this->commands);
+    }
+    
+    public function _read($messageArr = array())
+    {
+        global $burnBot;
+        
+        $greet = $this->config['welcome'];
+        
+        $split = explode(' ', $messageArr['message']);
+        $target = $split[0];
+        array_shift($split);
+        $message = implode(' ', $split);
+        
+        // Subscription event
+        if (($message == 'just subscribed!') && $this->config['welcome_enabled'])
+        {
+            // Welcome the subscriber
+            $burnBot->addMessageToQue("$target! $greet");
+            return;
+        }
     }
     
     public function twitch_game($sender, $msg = '')
@@ -307,9 +344,104 @@ class twitch_irc extends twitch
         }        
     }
     
+    public function twitch_welcomesubs($sender, $msg = '')
+    {
+        global $burnBot, $db;
+        
+        $split = explode(' ', $msg);
+        $greet = $this->config['welcome'];
+        
+        if (isset($split[0]) && (($split[0] == 'enable') || ($split[0] == 'disable')))
+        {
+            // Remove the state and rebuild the rest of the message
+            $command = $split[0];
+            array_shift($split);
+            if (!empty($split))
+            {
+                $welcome = implode(' ', $split);
+            } else {
+                // Keep it at our default
+                $welcome = $greet;
+            }
+            
+            // action
+            if ($command == 'enable')
+            {
+                $sql = $db->sql_build_update(BURNBOT_TWITCHCONFIG, array(
+                    'welcome_enabled' => true,
+                    'welcome' => $welcome
+                ), array(
+                    'id' => $this->sessionID
+                ));
+                $result = $db->sql_query($sql);
+                if ($result !== false)
+                {
+                    $burnBot->addMessageToQue("Welcome message to new subscribers enabled with the following greet: $welcome");
+                    
+                    // Update the config here because a fail on the query means this should stay as is
+                    $this->config['welcome'] = $welcome;
+                    $this->config['welcome_enabled'] = true;
+                } else {
+                    $burnBot->addMessageToQue("Unable to update welcome state, please check logs for error");
+                }
+                $db->sql_freeresult($result);
+                
+                return;
+            } else {
+                $sql = $db->sql_build_update(BURNBOT_TWITCHCONFIG, array(
+                    'welcome_enabled' => false,
+                ), array(
+                    'id' => $this->sessionID
+                ));
+                $result = $db->sql_query($sql);
+                if ($result !== false)
+                {
+                    $burnBot->addMessageToQue("Welcome message to new subscribers disabled");
+                    
+                    // Update the config here because a fail on the query means this should stay as is
+                    $this->config['welcome_enabled'] = false;
+                } else {
+                    $burnBot->addMessageToQue("Unable to update welcome state, please check logs for error");
+                }
+                $db->sql_freeresult($result);
+                
+                return;                
+            }
+        }
+        
+        // No enable or disable, are we changing the message?
+        if ($msg != '')
+        {
+            $sql = $db->sql_build_update(BURNBOT_TWITCHCONFIG, array(
+                'welcome' => $msg,
+            ), array(
+                'id' => $this->sessionID
+            ));
+            $result = $db->sql_query($sql);
+            if ($result !== false)
+            {
+                $burnBot->addMessageToQue("New subscribers welcome changed to: $msg");
+                
+                // Update the config here because a fail on the query means this should stay as is
+                $this->config['welcome_enabled'] = false;
+            } else {
+                $burnBot->addMessageToQue("Unable to update welcome message, please check logs for error");
+            }
+            $db->sql_freeresult($result);
+            
+            return;
+        }
+        
+        // Nope, return the message as an example
+        $burnBot->addMessageToQue("New Subscribers greeting: $greet");
+    }
+    
     public function help($trigger)
     {
         global $burnBot;
+        
+        // Synch up with the command delimeter
+        $this->commandDelimeter = $burnBot->getCommandDelimeter();
         
         if ($trigger != false)
         {
@@ -333,6 +465,11 @@ class twitch_irc extends twitch
                     
                 case 'twitch_updategame';
                     $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'twitch_updategame {game}.  Updates your current game to the one specified');
+                    break;
+                    
+                case 'twitch_welcomesubs':
+                    $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'twitch_welcomesubs {enable/disable}.  Enables or disables subscriber welcomes.  Usage: ' . $this->commandDelimeter . 'twitch_welcomesubs {enable} {message}.  Enables the subscriber welcome message with a new message appended');
+                    $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'twitch_welcomesubs.  Outputs the currently registered welcome message');
                     break;
                 
                 default:

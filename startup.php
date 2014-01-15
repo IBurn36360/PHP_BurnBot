@@ -17,28 +17,30 @@ session_destroy();
 require('./constants.php');
 require('./config.php');
 
-// Check all of these
+// Check all of these (Form forces information to be provided on all required fields)
 $host = (isset($_GET['host'])) ? $_GET['host'] : null;
 $chan = (isset($_GET['chan'])) ? $_GET['chan'] : null;
+
+// Force channel to have the # in from of it, don't allow the bot to join a user PM channel
+if ($chan[0] != '#')
+{
+    $chan = '#' . $chan;
+}
+
 $nick = (isset($_GET['nick'])) ? $_GET['nick'] : null;
 $pass = (isset($_GET['pass'])) ? $_GET['pass'] : null;
-$persist = (isset($_GET['persist'])) ? $_GET['persist'] : false; // reconnect when a DC happens
-$port = (isset($_GET['port'])) ? $_GET['port'] : 6667;
+$persist = (isset($_GET['persist']) && ($_GET['persist'] == '1')) ? true : false; // reconnect when a DC happens
+$port = (isset($_GET['port']) && ($_GET['port'] != '')) ? intval($_GET['port']) : 6667;
+
+// Print data to the page (For debugging, this will NOT be seen by the bot or anyone on the IRC side)
+echo 'Form Data: <br /><br />';
+echo "Host: $host:$port<br />";
+echo "Channel: $chan<br />";
+echo "Nickname: $nick<br />";
+echo "Password: $pass<br />";
+echo "Persistencey: " . strval($persist) . "<hr />";
 
 $connected = false;
-
-// Did we get everything we needed?
-if (($host == null) || ($chan == null) || ($nick == null))
-{
-    echo 'IRC details not presented, please put in your details:<br />';
-    echo "Host: $host<br />";
-    echo "Chan: $chan<br />";
-    echo "Nick: $nick<br />";
-    
-    // I will put in form data later for my own use, for now, exit gracefully
-    
-    exit;
-}
 
 // Set the file name we will be using for logging (TEMP...WILL BE BETTER LATER WHEN LISTENERS ADDED)
 $file = "./logs/$host $chan.php";
@@ -72,16 +74,16 @@ require('./burnbot.php');
 $burnBot = new burnbot;
 $irc->_log_action('Burnbot module loaded');
 
-// Load ticking actions (messages that appear on a timer)
-require('./reminder.php');
-$reminders = new reminder;
-$irc->_log_action('Reminders module loaded');
-
 // Twitch integration (generating passwords)
 require('./twitch.php');
 require('./twitch_irc.php');
 $twitch = new twitch_irc;
 $irc->_log_action('Twitch module loaded');
+
+// Load ticking actions (messages that appear on a timer)
+require('./reminder.php');
+$reminders = new reminder;
+$irc->_log_action('Reminders module loaded');
 
 // Moderation logic
 require('./moderation.php');
@@ -139,8 +141,15 @@ if ($burnBot->reconnect)
         
         if ($connected)
         {
-            primaryLoop();
+            break;
         }
     }
+}
+
+// Do this out here to stop recursive calls into the primary loop
+if ($connected)
+{
+    $connected = false;
+    primaryLoop();
 }
 ?>
