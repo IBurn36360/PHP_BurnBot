@@ -98,9 +98,11 @@ class irc_logger extends irc
         @fclose($h);
     }
     
-    public function _log_action($str)
+    public function _log_action($str, $name = 'action')
     {
         global $file;
+        
+        $name = strtoupper($name);
         
         // does our log file exist?
         if (!file_exists($file))
@@ -112,7 +114,7 @@ class irc_logger extends irc
         }
         
         $logTime = date('m-d-y~H:i:s', time());
-        @fwrite($h, "\n[ACTION]$logTime || $str");
+        @fwrite($h, "\n[$name]$logTime || $str");
         @fclose($h);
     }
     
@@ -134,7 +136,7 @@ class irc_logger extends irc
         @fclose($h);        
     }
     
-    public function _log_error_handler($errNo, $errStr)
+    public function _log_error_handler($errLevel, $errStr, $stack)
     {
         global $file;
         
@@ -148,7 +150,40 @@ class irc_logger extends irc
         }
         
         $logTime = date('m-d-y~H:i:s', time());
-        @fwrite($h, "\n[PHP_ERROR]$logTime || $errNo:$errStr");
+        @fwrite($h, "\n[$errLevel]$logTime || $errStr");
+        
+        // Now write the stacktrace
+        if (is_array($stack) && !empty($stack))
+        {
+            array_shift($stack);
+            
+            // Space the stacktrace out
+            $whitespace = '                            ';
+            for ($i = 1; $i <= strlen($errLevel); $i++)
+            {
+                $whitespace .= ' ';
+            }
+            
+            foreach ($stack as $row)
+            {
+                if ($row['class'] != '')
+                {
+                    $str = "\n" . $whitespace . $row['class'] . '::' . $row['function'] . '(';
+                } else {
+                    $str = "\n" . $whitespace . $row['function'] . '(';
+                }
+                
+                foreach($row['args'] as $arg)
+                {
+                    $str .= "$arg, ";
+                }
+                $str = rtrim($str, ', ');
+                $str .= ')' . '.  In file ' . $row['file'] . ' on line ' . $row['line'];
+                
+                @fwrite($h, $str);
+            }
+        }
+        
         @fclose($h);        
     }
 }

@@ -7,18 +7,20 @@ if (!defined('IN_IRC'))
 
 class reminder
 {
-    var $sessionID = 0;
-    var $commandDelimeter = '';
-    var $nick = '';
+    protected $sessionID = 0;
+    protected $commandDelimeter = '';
+    protected $nick = '';
     
-    var $lastReminderTime = 0;
-    var $enabled = false;
-    var $defaultTTL = 300;
+    protected $constructed = false;
+    
+    protected $lastReminderTime = 0;
+    protected $enabled = false;
+    protected $defaultTTL = 300;
     
     // The minimum ammount of time between reminders.  Although they will have their own limits, This stops reminders from being sent on top of each other
-    var $reminderDelayPeriod = 120;
+    protected $reminderDelayPeriod = 120;
     
-    var $commands = array(
+    protected $commands = array(
         'addreminder'           => array('reminders', 'reminders_addreminder', true, false, false, false),
         'delreminder'           => array('reminders', 'reminders_delreminder', true, false, false, false),
         'editreminder'          => array('reminders', 'reminders_editreminder', true, false, false, false),
@@ -29,49 +31,52 @@ class reminder
         'reminders_commands'    => array('reminders', 'reminders_commands', true, false, false, false)
     );
     
-    var $remindersStack = array();
-    var $reminders = array();
+    protected $remindersStack = array();
+    protected $reminders = array();
     
-    var $commandsStack = array();
+    protected $commandsStack = array();
     
-    function __construct()
+    function __construct($register = false)
     {
         global $burnBot, $irc, $db;
         
-        // Synch up with core
-        $this->sessionID = $burnBot->getSessionID();
-        $this->commandDelimeter = $burnBot->getCommandDelimeter();
-        $this->nick = $burnBot->getNick();
-        
-        $this->lastReminderTime = time();
-        
-        // Grab base config
-        $sql = $db->sql_build_select(BURNBOT_REMINDERSCONFIG, array(
-            'enabled'
-        ), array(
-            'id' => $this->sessionID
-        ));
-        $result = $db->sql_query($sql);
-        $rows = $db->sql_fetchrow($result);
-        $db->sql_freeresult($result);
-        
-        if (!empty($rows))
+        if ($register)
         {
-            $this->enabled = $rows['enabled'];
+            // Register the module
+            $burnBot->registerModule(array('reminders' => array('enabled' => true, 'class' => 'reminder')));            
         } else {
-            // Create
-            $sql = $db->sql_build_insert(BURNBOT_REMINDERSCONFIG, array(
-                'id' => $this->sessionID,
-                'enabled' => $this->enabled
+            // Synch up with core
+            $this->sessionID = $burnBot->getSessionID();
+            $this->commandDelimeter = $burnBot->getCommandDelimeter();
+            $this->nick = $burnBot->getNick();
+            
+            $this->lastReminderTime = time();
+            
+            // Grab base config
+            $sql = $db->sql_build_select(BURNBOT_REMINDERSCONFIG, array(
+                'enabled'
+            ), array(
+                'id' => $this->sessionID
             ));
             $result = $db->sql_query($sql);
+            $rows = $db->sql_fetchrow($result);
             $db->sql_freeresult($result);
+            
+            if (!empty($rows))
+            {
+                $this->enabled = $rows['enabled'];
+            } else {
+                // Create
+                $sql = $db->sql_build_insert(BURNBOT_REMINDERSCONFIG, array(
+                    'id' => $this->sessionID,
+                    'enabled' => $this->enabled
+                ));
+                $result = $db->sql_query($sql);
+                $db->sql_freeresult($result);
+            }
+            
+            $irc->_log_action('Reminders module environment constructed');
         }
-        
-        // Register the module
-        $burnBot->registerModule(array('reminders' => true));
-        
-        $irc->_log_action('Reminders module environment constructed');
     }
     
     public function init()
@@ -147,6 +152,11 @@ class reminder
         $burnBot->registerCommads($this->commands);
     }
     
+    public function _read($messageArr)
+    {
+        
+    }
+    
     // Checks the reminders que and processes it (DOES NOT STOP RUNNING EVEN IF DISABLED)
     public function tick()
     {
@@ -177,7 +187,7 @@ class reminder
                 $reminder = $this->remindersStack[$current];
                 $name = $reminder['name'];
                 
-                $irc->_log_action("Processing key $current");
+                $irc->_log_action("Processing key $current", "reminders");
                 
                 // Are we running a command?
                 if ($this->enabled)
@@ -202,19 +212,19 @@ class reminder
                 $next = $current + $reminder['ttl'];
                 
                 // Do not overwrite another reminder
-                while (array_key_exists($next, $this->reminders))
+                while (array_key_exists($next, $this->remindersStack))
                 {
                     $next++;
                 }
                 
                 unset($this->remindersStack[$current]);
-                $this->reminders[$next] = $reminder;
+                $this->remindersStack[$next] = $reminder;
                 
-                krsort($this->reminders, SORT_NUMERIC);
+                ksort($this->remindersStack, SORT_NUMERIC);
             }
             
             $update = $tickStartTime + $this->reminderDelayPeriod;
-            $irc->_log_action("Reminder TTL updated to $update");
+            $irc->_log_action("Reminder TTL updated to $update", "reminders");
             $this->lastReminderTime = $update;
         }
     }
@@ -274,7 +284,7 @@ class reminder
             $this->reminders[$name] = array('output' => $output, 'ttl' => $this->defaultTTL);
             
             // pass it into the stack
-            $time = time() + $this->defaultTTL;
+            $time = time() + $this->reminderDelayPeriod;
             while (array_key_exists($time, $this->remindersStack))
             {
                 $time++;
@@ -402,7 +412,7 @@ class reminder
         $result = $db->sql_query($sql);
         if ($result !== false)
         {
-            $burnBot->addMessageToQue("Reminder $name has been sucessfully updatd");
+            $burnBot->addMessageToQue("Reminder $name has been sucessfully updated");
             
             // Update the registered reminders
             unset($this->reminders[$name]);
@@ -447,6 +457,8 @@ class reminder
                     {
                         $burnBot->addMessageToQue("Reminders are enabled");
                         $db->sql_freeresult($result);
+                        
+                        $this->enabled = true;
                     } else {
                         $burnBot->addMessageToQue("An error occured while trying to enable reminders.  Please see log");
                         $db->sql_freeresult($result);
@@ -462,10 +474,12 @@ class reminder
                     {
                         $burnBot->addMessageToQue("Reminders are disabled");
                         $db->sql_freeresult($result);
+                        
+                        $this->enabled = false;
                     } else {
                         $burnBot->addMessageToQue("An error occured while trying to disable reminders.  Please see log");
                         $db->sql_freeresult($result);
-                    }                    
+                    }
                 }
             } else {
                 $name = strtolower($split[0]);

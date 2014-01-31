@@ -7,7 +7,7 @@ if (!defined('IN_IRC'))
 
 class twitch_irc extends twitch
 {
-    var $commands = array(
+    protected $commands = array(
         'game' => array('twitch', 'twitch_game', false, false, false, false),
         'game_steam' => array('twitch', 'twitch_steam', true, false, false, false),
         'game_gfs' => array('twitch', 'twitch_gfs', true, false, false, false),
@@ -16,93 +16,98 @@ class twitch_irc extends twitch
         'twitch_welcomesubs' => array('twitch', 'twitch_welcomesubs', true, false, false, false)
     );
     
-    var $isTwitch = false;
-    var $config = array();
-    var $sessionID = 0;
-    var $commandDelimeter = '';
+    protected $isTwitch = false;
+    protected $config = array();
+    protected $sessionID = 0;
+    protected $commandDelimeter = '';
     
-    var $tokenAvailable = true;
+    protected $constructed = false;
     
-    var $chan = '';
-    var $token = '';
-    var $code = '';
+    protected $tokenAvailable = true;
     
-    var $game = '';
-    var $lastGamePull = 0;
-    var $gameTTL = 300;
+    protected $chan = '';
+    protected $token = '';
+    protected $code = '';
     
-    function __construct()
+    protected $game = '';
+    protected $lastGamePull = 0;
+    protected $gameTTL = 300;
+    
+    function __construct($register = false)
     {
         global $burnBot, $irc, $db;
         
-        // Synch up to the burnbot configuration
-        $this->isTwitch = ($burnBot->getIsTwitch()) ? true : false;
-        $this->sessionID = $burnBot->getSessionID();
-        $this->chan = $burnBot->getChan();
-        $this->commandDelimeter = $burnBot->getCommandDelimeter();
-        
-        // Register the module
-        if ($this->isTwitch)
+        if ($register)
         {
-            $burnBot->registerModule(array('twitch' => true));
+            // Register the module
+            if ($this->isTwitch)
+            {
+                $burnBot->registerModule(array('twitch' => array('enabled' => true, 'class' => 'twitch_irc')));
+            } else {
+                // make sure it is disabled by default if we are not on Twitch.  This can be overridden
+                $burnBot->registerModule(array('twitch' => array('enabled' => false, 'class' => 'twitch_irc')));
+            }            
         } else {
-            // make sure it is disabled by default if we are not on Twitch.  This can be overridden
-            $burnBot->registerModule(array('twitch' => false));
-        }
-        
-        // Weather or not we are enabled...load our init SQL so we can run even if we are disabled during construction
-        $sql = $db->sql_build_select(BURNBOT_TWITCHCONFIG, array(
-            'gfs_enabled',
-            'gfs',
-            'steam_enabled',
-            'welcome_enabled',
-            'welcome'
-        ), array(
-            'id' => $this->sessionID
-        ));
-        $result = $db->sql_query($sql);
-        $row = $db->sql_fetchrow($result);
-        $db->sql_freeresult($result);
-        
-        if (!empty($row))
-        {
-            // Bool out some data here
-            $gfs = ($row['gfs_enabled'] == 1) ? true : false;
-            $steam = ($row['steam_enabled'] == 1) ? true : false;
-            $welcome = ($row['welcome_enabled'] == 1) ? true : false;
+            // Synch up to the burnbot configuration
+            $this->isTwitch = ($burnBot->getIsTwitch()) ? true : false;
+            $this->sessionID = $burnBot->getSessionID();
+            $this->chan = $burnBot->getChan();
+            $this->commandDelimeter = $burnBot->getCommandDelimeter();
             
-            // Construct our config array
-            $this->config = array(
-                'gfs_enabled' => $gfs,
-                'steam_enabled' => $steam,
-                'gfs' => $row['gfs'],
-                'welcome_enabled' => $welcome,
-                'welcome' => $row['welcome']
-            );
-        } else {
-            // Create a row here to save us some time and checks later
-            $sql = $db->sql_build_insert(BURNBOT_TWITCHCONFIG, array(
-                'id' => $this->sessionID,
-                'gfs_enabled' => false,
-                'steam_enabled' => false,
-                'gfs' => '',
-                'welcome_enabled' => false,
-                'welcome' => ''
+            // Weather or not we are enabled...load our init SQL so we can run even if we are disabled during construction
+            $sql = $db->sql_build_select(BURNBOT_TWITCHCONFIG, array(
+                'gfs_enabled',
+                'gfs',
+                'steam_enabled',
+                'welcome_enabled',
+                'welcome'
+            ), array(
+                'id' => $this->sessionID
             ));
             $result = $db->sql_query($sql);
+            $row = $db->sql_fetchrow($result);
             $db->sql_freeresult($result);
             
-            // Construct our config array
-            $this->config = array(
-                'gfs_enabled' => false,
-                'steam_enabled' => false,
-                'gfs' => '',
-                'welcome_enabled' => false,
-                'welcome' => 'Welcome to the channel and thank you for showing your support!'
-            );
+            if (!empty($row))
+            {
+                // Bool out some data here
+                $gfs = ($row['gfs_enabled'] == 1) ? true : false;
+                $steam = ($row['steam_enabled'] == 1) ? true : false;
+                $welcome = ($row['welcome_enabled'] == 1) ? true : false;
+                
+                // Construct our config array
+                $this->config = array(
+                    'gfs_enabled' => $gfs,
+                    'steam_enabled' => $steam,
+                    'gfs' => $row['gfs'],
+                    'welcome_enabled' => $welcome,
+                    'welcome' => $row['welcome']
+                );
+            } else {
+                // Create a row here to save us some time and checks later
+                $sql = $db->sql_build_insert(BURNBOT_TWITCHCONFIG, array(
+                    'id' => $this->sessionID,
+                    'gfs_enabled' => false,
+                    'steam_enabled' => false,
+                    'gfs' => '',
+                    'welcome_enabled' => false,
+                    'welcome' => ''
+                ));
+                $result = $db->sql_query($sql);
+                $db->sql_freeresult($result);
+                
+                // Construct our config array
+                $this->config = array(
+                    'gfs_enabled' => false,
+                    'steam_enabled' => false,
+                    'gfs' => '',
+                    'welcome_enabled' => false,
+                    'welcome' => 'Welcome to the channel and thank you for showing your support!'
+                );
+            }
+            
+            $irc->_log_action("Twitch environment constructed");            
         }
-        
-        $irc->_log_action("Twitch environment constructed");
     }
     
     public function init()
@@ -141,7 +146,7 @@ class twitch_irc extends twitch
                 $this->code = $row['code'];
             } else {
                 // Disable our update commands, we have no need for them since they will never work anyway
-                $irc->_log_error("Unable to grab a token for this session, please use the following to generate an AUTH code: " . $this->generateAuthorizationURL(array('channel_editor')));
+                $irc->_log_action("Unable to grab a token for this session, please use the following to generate an AUTH code: " . $this->generateAuthorizationURL(array('channel_editor', "twitch")));
                 $this->tokenAvailable = false;
             }
         }
@@ -160,6 +165,12 @@ class twitch_irc extends twitch
     {
         global $burnBot;
         
+        if (($messageArr['type'] != 'private') || ($messageArr['nick'] != 'twitchnotify'))
+        {
+            // No need to see this message
+            return;
+        }
+        
         $greet = $this->config['welcome'];
         
         $split = explode(' ', $messageArr['message']);
@@ -174,6 +185,11 @@ class twitch_irc extends twitch
             $burnBot->addMessageToQue("$target! $greet");
             return;
         }
+    }
+    
+    public function tick()
+    {
+        
     }
     
     public function twitch_game($sender, $msg = '')

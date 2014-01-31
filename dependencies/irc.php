@@ -129,7 +129,7 @@ class irc
                     $messageArr = array(
                         'type' => $type,
                         'command' => $command,
-                        'user' => $user,
+                        'nick' => $user,
                         'value' => $value
                     );
                 } else {
@@ -139,7 +139,7 @@ class irc
                     $messageArr = array(
                         'type' => $type,
                         'command' => $command,
-                        'user' => $user
+                        'nick' => $user
                     );                    
                 }
             }
@@ -174,6 +174,7 @@ class irc
                     case '375': // MOTD Init
                     case '372': // MOTD
                     case '376': // MOTD end
+                    case '266': // Global user count (ircd)
                         
                         // Set all of the data for this type of message
                         $nick = $split[2];
@@ -192,7 +193,6 @@ class irc
                     
                     // These messages have a channel attached to them
                     case '331': // No topic
-                    case '332': // Channel Topic
                     case '333': // Channel Auth Nick
                     case '366': // End WHO
                         
@@ -213,17 +213,38 @@ class irc
                         
                         break;
                         
+                    case '332': // Channel Topic
+                        // Set all of the data for this type of message
+                        $host = $split[0];
+                        $chan = $split[3];
+                                                
+                        for ($i = 0; $i <= 3; $i++)
+                        {
+                            array_shift($split);
+                        }
+                        $words = trim(implode(' ', $split), ':');
+                        
+                        // Build the array
+                        $messageArr = array(
+                            'type' => $type,
+                            'host' => $host,
+                            'chan' => $chan,
+                            'service_id' => $serviceID,
+                            'message' => $words
+                        );
+                        
+                        break;
+                        
                     case '353': // Channel WHO (Join)
                     
                          // Set all of the data for this type of message
                         $nick = $split[2];
                         $chan = $split[4];
                         
-                        for ($i = 1; $i <= 5; $i++)
+                        for ($i = 0; $i <= 5; $i++)
                         {
                             array_shift($split);
                         }
-                        
                         $words = trim(implode(' ', $split), ':');
                         
                         // Build the array
@@ -259,6 +280,18 @@ class irc
                             'service_id' => $serviceID
                         );
                         break;
+                        
+                    // :port80c.se.quakenet.org 432 BurnBot 10BlueBot :Erroneous Nickname
+                    case '432':
+                        $oldNick = $split[2];
+                        $newNick = $split[3];
+                    
+                        $messageArr = array(
+                            'type' => $type,
+                            'service_id' => $serviceID,
+                            'newNick' => $newNick,
+                            'oldNick' => $oldNick
+                        );
                     
                     default: // We don't know this service ID.  It may be put in in a future update
                         break;
@@ -287,7 +320,45 @@ class irc
                     return $messageArr;
                 }
                 
-                // Start with MODE
+                // QUIT
+                if (preg_match('[quit]i', $message) != 0)
+                {
+                    $hostnames = explode('!', $split[0]);
+                    $nick = $hostnames[0];
+                    $host = trim($hostnames[1], '~');
+                    
+                    $messageArr = array(
+                        'type' => $type,
+                        'isQuit' => true,
+                        'nick' => $nick,
+                        'host' => $host
+                    );
+                }
+                
+                // TOPIC
+                if (preg_match('[topic]i', $message) != 0)
+                {
+                    $hostnames = explode('!', $split[0]);
+                    $nick = $hostnames[0];
+                    $host = trim($hostnames[1], '~');
+                    $chan = $split[2];
+                    
+                    for ($i = 0; $i <= 2; $i++)
+                    {
+                        array_shift($split);
+                    }
+                    $topic = trim(implode(' ', $split), ':');                                                            
+                    
+                    $messageArr = array(
+                        'type' => $type,
+                        'isTopic' => true,
+                        'nick' => $nick,
+                        'host' => $host,
+                        'topic' => $topic,
+                        'chan' => $chan
+                    );
+                }
+                
                 if (preg_match('[mode]i', $message) != 0)
                 {
                     // Set our values that need to be modified
@@ -305,7 +376,7 @@ class irc
                             'type' => $type,
                             'chan' => $chan,
                             'mode' => $mode,
-                            'user' => $user
+                            'nick' => $user
                         );                        
                     } else {
                         // This is a case where the mode is our default.  It doesn't have a service ID attached, so we will build the array differently here for the bot to recognize it properly
@@ -331,11 +402,13 @@ class irc
                         $splits = explode('!', $hostnames);
                         $nick = $splits[0];
                         $hostnames = explode('@', $splits[1]);
+                        $client = trim($hostnames[0], '~');
                         $hostname = trim($hostnames[1], '~');
                     } else {
                         $splits = explode('@', $hostnames);
                         $nick = $splits[0];
-                        $hostname = $splits[0];
+                        $client = $splits[0];
+                        $hostname = $splits[1];
                     }
                     
                     $messageArr = array(
@@ -343,6 +416,7 @@ class irc
                         'isJoin' => true,
                         'nick' => $nick,
                         'host' => $hostname,
+                        'client' => $client,
                         'chan' => $split[2]
                     );
                     
@@ -422,7 +496,7 @@ class irc
                 {
                     $hostnames = explode('!', $split[0]);
                     $oldNick = $hostnames[0];
-                    $hostname = trim($hostname[1], '~');
+                    $hostname = trim($hostnames[1], '~');
                     $newNick = trim($split[2], ':');
                     
                     $messageArr = array(
@@ -437,7 +511,7 @@ class irc
                 }
                 
                 // AUTH (No-NickServ)
-                if ((preg_match('[NOTICE AUTH]i', $message) != 0))
+                if ((preg_match('[NOTICE AUTH]i', $message) != 0) || (preg_match('[NOTICE Auth]i', $message) != 0))
                 {
                     $explode = explode(':', $message);
                     

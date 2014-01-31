@@ -7,6 +7,8 @@ define('IN_IRC', true);
 define('BURNBOT_COMMANDS', 'commands');
 define('BURNBOT_COMMANDS_CONFIG', 'commands_config');
 define('BURNBOT_CONNECTIONS', 'connections');
+define('BURNBOT_MODERATION_CONFIG', 'moderation_config');
+define('BURNBOT_MODERATION_ENDERS', 'moderation_url_enders');
 define('BURNBOT_MODULES_CONFIG', 'modules_config');
 define('BURNBOT_REGULARS', 'regulars');
 define('BURNBOT_REMINDERS', 'reminders');
