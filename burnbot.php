@@ -37,6 +37,7 @@ class burnbot
     protected $hasJoined = false;
     
     // Arrays (Large storage)
+    protected $blacklistedCommands = array();
     protected $loadedCommands = array();
     protected $userCommands = array();
     protected $loadedModules = array();
@@ -439,13 +440,23 @@ class burnbot
                     $turbo = ($row['turbo'] == 1) ? true : false;
                     
                     $this->registerCommads(array($row['_trigger'] => array($mod, $func, $ops, $regs, $subs, $turbo)));
-                    
                     $trigger = $row['_trigger'];
-                    $irc->_log_action("Loaded configuration for trigger [$trigger] ($ops) ($regs) ($subs) ($turbo)");
+                    
+                    // Construct our log string
+                    $str = "Loaded configuration for trigger [$trigger] ";
+                    $str .= ($ops)   ? '{Ops}(true) '  : '{Ops}(false) ';
+                    $str .= ($regs)  ? '{regs}(true) ' : '{regs}(false) ';
+                    $str .= ($subs)  ? '{Subs}(true) ' : '{Subs}(false) ';
+                    $str .= ($turbo) ? '{Turbo}(true)' : '{Turbo}(false)';
+                    $irc->_log_action($str);
                 } else {
                     unset($this->loadedCommands[$row['_trigger']]);
+                    
+                    // Log that the command was disabled
+                    $trigger = $row['_trigger'];
+                    $irc->_log_action("Loaded configuration for trigger [$trigger] (Disabled)");
                 }
-            }       
+            }
         }
         
         // Now load the module config
@@ -1231,7 +1242,7 @@ class burnbot
                         if ($this->isTwitch && !$this->hasJoined)
                         {
                             $irc->_joinChannel($socket, $chan);
-                            $irc->_write($socket, "TWITCHCLIENT 2");
+                            $irc->_write($socket, "TWITCHCLIENT 1");
                             $this->hasJoined = true;
                             
                             // Lastly, change our read limiter to where it should be

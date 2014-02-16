@@ -14,11 +14,13 @@ class reminder
     protected $constructed = false;
     
     protected $lastReminderTime = 0;
+    protected $lastmessageTime = 0;
     protected $enabled = false;
     protected $defaultTTL = 300;
     
     // The minimum ammount of time between reminders.  Although they will have their own limits, This stops reminders from being sent on top of each other
     protected $reminderDelayPeriod = 120;
+    protected $messageDelayPeriod  = 600;
     
     protected $commands = array(
         'addreminder'           => array('reminders', 'reminders_addreminder', true, false, false, false),
@@ -51,6 +53,7 @@ class reminder
             $this->nick = $burnBot->getNick();
             
             $this->lastReminderTime = time();
+            $this->lastmessageTime  = time();
             
             // Grab base config
             $sql = $db->sql_build_select(BURNBOT_REMINDERSCONFIG, array(
@@ -195,6 +198,9 @@ class reminder
                     if (array_key_exists('trigger', $reminder))
                     {
                         $this->runCommand($reminder['trigger'], $reminder['args']);
+                        $update = $tickStartTime + $this->reminderDelayPeriod;
+                        $irc->_log_action("Reminder TTL updated to $update", "reminders");
+                        $this->lastReminderTime = $update;
                     } else {
                         // Assume that it is an output
                         $output = (array_key_exists('output', $reminder)) ? $reminder['output'] : false;
@@ -204,8 +210,11 @@ class reminder
                             $irc->_log_error("Reminder or command $name not in proper format");
                         } else {
                             $burnBot->addMessageToQue($output);
+                            $update = $tickStartTime + $this->reminderDelayPeriod;
+                            $irc->_log_action("Reminder TTL updated to $update", "reminders");
+                            $this->lastReminderTime = $update;
                         }
-                    }   
+                    }
                 }
                 
                 // Even if we failed or if we are disabled right now, proccess the stack and shift it
@@ -222,10 +231,6 @@ class reminder
                 
                 ksort($this->remindersStack, SORT_NUMERIC);
             }
-            
-            $update = $tickStartTime + $this->reminderDelayPeriod;
-            $irc->_log_action("Reminder TTL updated to $update", "reminders");
-            $this->lastReminderTime = $update;
         }
     }
     
@@ -281,7 +286,7 @@ class reminder
             $burnBot->addMessageToQue("Reminder $name has been sucessfully added");
             
             // Update the registered reminders and stack here
-            $this->reminders[$name] = array('output' => $output, 'ttl' => $this->defaultTTL);
+            $this->reminders = array_merge($this->reminders, array($name => array('output' => $output, 'ttl' => $this->defaultTTL)));
             
             // pass it into the stack
             $time = time() + $this->reminderDelayPeriod;
@@ -390,18 +395,6 @@ class reminder
             $output = $this->reminders[$name]['output'];
         }
         
-        // Update the register and and stack
-        $this->reminders[$name] = array('name' => $name, 'output' => $output, 'ttl' => $ttl);
-        
-        foreach ($this->remindersStack as $time => $arr)
-        {
-            if ($arr['name'] == $name)
-            {
-                $this->remindersStack[$time] = array('name' => $name, 'output' => $output, 'ttl' => $ttl);
-                break;
-            }
-        }
-        
         $sql = $db->sql_build_update(BURNBOT_REMINDERS, array(
             'ttl' => $ttl,
             'output' => $output
@@ -414,8 +407,17 @@ class reminder
         {
             $burnBot->addMessageToQue("Reminder $name has been sucessfully updated");
             
-            // Update the registered reminders
-            unset($this->reminders[$name]);
+            // Update the register and and stack
+            $this->reminders = array_merge($this->reminders, array($name => array('output' => $output, 'ttl' => $ttl)));
+            
+            foreach ($this->remindersStack as $time => $arr)
+            {
+                if ($arr['name'] == $name)
+                {
+                    $this->remindersStack[$time] = array('name' => $name, 'output' => $output, 'ttl' => $ttl);
+                    break;
+                }
+            }
         } else {
             $burnBot->addMessageToQue("Reminder $name has not been updated.  Please check logs");
         }
@@ -536,7 +538,7 @@ class reminder
             $burnBot->addMessageToQue("Recurring command $name has been successfully added");
             
             // Update the registered reminders and stack here
-            $this->commandsStack[$name] = array('args' => $args, 'ttl' => $this->defaultTTL, 'trigger' => $trigger, 'name' => $name);
+            $this->commandsStack = array_merge($this->commandsStack, array($name => array('args' => $args, 'ttl' => $this->defaultTTL, 'trigger' => $trigger, 'name' => $name)));
             
             // pass it into the stack
             $time = time() + $this->defaultTTL;
@@ -545,10 +547,7 @@ class reminder
                 $time++;
             }
             
-            $this->remindersStack[$time] = array('args' => $args, 'ttl' => $this->defaultTTL, 'trigger' => $trigger, 'name' => $name);
-            
-            // Update the registered reminders
-            unset($this->reminders[$name]);
+            $this->remindersStack = array_merge($this->remindersStack, array($time => array('args' => $args, 'ttl' => $this->defaultTTL, 'trigger' => $trigger, 'name' => $name)));
         } else {
             $burnBot->addMessageToQue("Recurring command $name has not been successfully added.  Please check logs");
         }
@@ -590,11 +589,9 @@ class reminder
             unset($this->commandsStack[$name]);
         } else {
             $burnBot->addMessageToQue("Recurring command $name has not been deleted.  Please check logs");
+            return;
         }
         $db->sql_freeresult($result);
-        
-        // Now remove the reminder from both the register and the stack
-        unset($this->commandsStack[$name]);
         
         // The stack
         {
@@ -650,13 +647,13 @@ class reminder
         }
         
         // Update the register and and stack
-        $this->commandsStack[$name] = array('name' => $name, 'trigger' => $trigger, 'ttl' => $ttl, 'args' => $args);
+        $this->commandsStack = array_merge($this->commandsStack, array($name => array('name' => $name, 'trigger' => $trigger, 'ttl' => $ttl, 'args' => $args)));
         
         foreach ($this->remindersStack as $time => $arr)
         {
             if ($arr['name'] == $name)
             {
-                $this->remindersStack[$time] = array('name' => $name, 'trigger' => $trigger, 'ttl' => $ttl, 'args' => $args);
+                $this->remindersStack = array_merge($this->remindersStack, array($time => array('name' => $name, 'trigger' => $trigger, 'ttl' => $ttl, 'args' => $args)));
                 break;
             }
         }

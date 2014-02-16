@@ -302,7 +302,7 @@ class irc
                 // We have no service ID.  Time to look for a command
                 
                 // Errors
-                if (preg_match('[error]i', $message) != 0)
+                if (preg_match('[ error ]i', $message) != 0)
                 {
                     // Link closed (For some reason the socket was closed, be sure to pass to an exit handler in this case)
                     if (preg_match('[Closing Link]i', $message) != 0)
@@ -321,7 +321,7 @@ class irc
                 }
                 
                 // QUIT
-                if (preg_match('[quit]i', $message) != 0)
+                if (preg_match('[ quit ]i', $message) != 0)
                 {
                     $hostnames = explode('!', $split[0]);
                     $nick = $hostnames[0];
@@ -336,7 +336,7 @@ class irc
                 }
                 
                 // TOPIC
-                if (preg_match('[topic]i', $message) != 0)
+                if (preg_match('[ topic ]i', $message) != 0)
                 {
                     $hostnames = explode('!', $split[0]);
                     $nick = $hostnames[0];
@@ -359,7 +359,9 @@ class irc
                     );
                 }
                 
-                if (preg_match('[mode]i', $message) != 0)
+                // [INCOMING]02-10-14~17:11:51 <= :*.quakenet.org MODE #izlsnizzt +ovoooo fire fire Q IBurn36360 expertsonline Izlsnizzt
+                // [INCOMING]02-10-14~17:11:51 <= :*.quakenet.org MODE #izlsnizzt +vvvvv ilude Dante557 JonOfAllGames Laggy Aqua
+                if (strtolower($split[1]) == 'mode')
                 {
                     // Set our values that need to be modified
                     $chan = $split[2];
@@ -392,7 +394,7 @@ class irc
                 }
                 
                 // JOIN
-                if (preg_match('[join]i', $message) != 0)
+                if (strtolower($split[1]) == 'join')
                 {
                     $hostnames = $split[0];
                     
@@ -424,7 +426,7 @@ class irc
                 }
                 
                 // PART
-                if (preg_match('[part]i', $message) != 0)
+                if (strtolower($split[1]) == 'part')
                 {
                     $hostnames = $split[0];
                     
@@ -453,7 +455,7 @@ class irc
                 }
                 
                 // PING
-                if (preg_match('[ping]i', $message) != 0)
+                if (strtolower($split[0]) == 'ping')
                 {
                     $explode = explode(':', $message);
                     
@@ -478,7 +480,7 @@ class irc
                 }
                 
                 // PONG response
-                if (preg_match('[pong]i', $message) != 0)
+                if (strtolower($split[1]) == 'pong')
                 {
                     $messageArr = array(
                         'type' => $type,
@@ -491,8 +493,7 @@ class irc
                 }
                 
                 // NICK changes
-                // :IBurn36360_!~IBurn3636@c-75-70-217-195.hsd1.co.comcast.net NICK :IBurn36360
-                if (preg_match('[nick]i', $message) != 0)
+                if (strtolower($split[1]) == 'nick')
                 {
                     $hostnames = explode('!', $split[0]);
                     $oldNick = $hostnames[0];
