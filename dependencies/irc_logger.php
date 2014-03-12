@@ -17,7 +17,14 @@ class irc_logger extends irc
     
     public function _read($socket, $len = 4096)
     {
-    	$read = fgets($socket, $len);
+    	$read = socket_read($socket, 4096, PHP_NORMAL_READ);
+        if ($read != '')
+        {
+            while ((strstr($read, "\r\n") == ''))
+            {
+                $read .= socket_read($socket, 4096, PHP_NORMAL_READ);
+            }
+        }
     	$read = rtrim($read);
         
         if (strlen($read) > 0)
@@ -158,7 +165,7 @@ class irc_logger extends irc
             array_shift($stack);
             
             // Space the stacktrace out
-            $whitespace = '                            ';
+            $whitespace = '                           ';
             for ($i = 1; $i <= strlen($errLevel); $i++)
             {
                 $whitespace .= ' ';

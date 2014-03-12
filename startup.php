@@ -1,64 +1,64 @@
 <?php
 
-ob_start();
-
-// Define headers
-echo '<html><head></head><body>';
-
-echo 'Starting startup<hr />';
-
 // Set execution time
 if (ini_get('max_execution_time') != 0)
 {
     ini_set('max_execution_time', '0');
 }
 
-// Set the session
-session_start();
-$_SESSION = array();
-session_destroy();
-
 // load all of our constants and config
 require('./dependencies/constants.php');
 require('./dependencies/config.php');
 
 // Check all of these (Form forces information to be provided on all required fields)
-$host = (isset($_GET['host'])) ? $_GET['host'] : null;
-$chan = (isset($_GET['chan'])) ? $_GET['chan'] : null;
+$host = (isset($_POST['host'])) ? strval($_POST['host']) : null;
+$chan = (isset($_POST['chan'])) ? strval($_POST['chan']) : null;
+$nick = (isset($_POST['nick'])) ? strval($_POST['nick']) : null;
+$pass = (isset($_POST['pass'])) ? strval($_POST['pass']) : null;
+$persist = (isset($_POST['persist']) && (strval($_POST['persist']) == '1')) ? true : false; // reconnect when a DC happens
+$port = (isset($_POST['port']) && (strval($_POST['port']) != '')) ? intval($_POST['port']) : 6667;
+$readOnly = (isset($_POST['read_only']) && (strval($_POST['read_only']) == '1')) ? true : false;
+$preJoin = (isset($_POST['prejoin'])) ? strval($_POST['prejoin']) : null;
+$postJoin = (isset($_POST['postjoin'])) ? strval($_POST['postjoin']) : null;
+$freshLog = (isset($_POST['new_log']) && (strval($_POST['new_log']) == '1')) ? true : false;
+$connected = false;
 
-// Force channel to have the # in from of it, don't allow the bot to join a user PM channel
-if ($chan[0] != '#')
+// Force channel to have the # in from of it, don't allow the bot to query a user as if they were a channel
+$chn = str_split($chan, 1);
+if ($chn[0] != '#')
 {
     $chan = '#' . $chan;
 }
 
-$nick = (isset($_GET['nick'])) ? $_GET['nick'] : null;
-$pass = (isset($_GET['pass'])) ? $_GET['pass'] : null;
-$persist = (isset($_GET['persist']) && ($_GET['persist'] == '1')) ? true : false; // reconnect when a DC happens
-$port = (isset($_GET['port']) && ($_GET['port'] != '')) ? intval($_GET['port']) : 6667;
-$readOnly = (isset($_GET['read_only']) && ($_GET['read_only'] == '1')) ? true : false;
+ob_start();
+
+// Define headers
+echo "<!DOCTYPE html>\n<head>\n</head>\n<body>\n";
+echo "Starting startup<hr />\n";
 
 // Print data to the page (For debugging, this will NOT be seen by the bot or anyone on the IRC side)
-echo 'Form Data: <br /><br />';
-echo "Host: $host:$port<br />";
-echo "Channel: $chan<br />";
-echo "Nickname: $nick<br />";
-echo "Password: $pass<br />";
-echo "Persistencey: " . strval($persist) . "<br />";
-echo "Read-Only: " . strval($readOnly) . "<hr />";
+echo "<table>\n";
+echo "<tr><td>Form Data:</td></tr>\n";
+echo "<tr><td>Host:</td><td>$host:$port</td></tr>\n";
+echo "<tr><td>Channel:</td><td>$chan</td></tr>\n";
+echo "<tr><td>Nickname:</td><td>$nick</td></tr>\n";
+echo "<tr><td>Password:</td><td>$pass</td></tr>\n";
+echo "<tr><td>Pre-Join Commands:</td><td>$preJoin</td></tr>\n";
+echo "<tr><td>Post-Join Commands:</td><td>$postJoin</td></tr>\n";
 
-$connected = false;
+$str = ($persist) ? 'true' : 'false';
+echo "<tr><td>Persistencey:</td><td>$str</td></tr>\n";
 
-// Set the file name we will be using for logging (TEMP...WILL BE BETTER LATER WHEN LISTENERS ADDED)
+$str = ($readOnly) ? 'true' : 'false';
+echo "<tr><td>Read-Only:</td><td>$str</td></tr\n";
+
+$str = ($freshLog) ? 'Old log deleted' : 'Old log kept';
+echo "<tr><td>$str</td></tr></table>\n<hr />\n";
+
 $file = "./logs/$host $chan.php";
 
-if (file_exists($file))
-{
-    unlink($file);
-}
-
-echo "Passing to log handlers on file $file.";
-echo '</body></html>';
+echo "Passing to log handlers on file $file.\n";
+echo "</body>\n</html>\n";
 
 header('Connection: close');
 header('Content-length: ' . ob_get_length());
@@ -67,6 +67,15 @@ header('Content-length: ' . ob_get_length());
 ob_end_flush();
 ob_flush();
 flush();
+
+if (file_exists($file) && $freshLog)
+{
+    unlink($file);
+} else {
+    $handle = @fopen($file, 'a');
+    @fwrite($h, "\n\n");
+    @fclose($handle);
+}
 
 // Include and init the IRC class and the logger
 require('./dependencies/irc.php');
@@ -193,6 +202,14 @@ unset($handle);
 // Startup
 $irc->_log_action("Creating socket connection for [$host:$port]");
 $socket = $irc->connect($host, $port);
+
+// The connection failed, bail out here
+if ($socket === false)
+{
+    $irc->_log_error("Socket was not created successfully");
+    exit;
+}
+
 $irc->setBlocking($socket);
 
 $burnBot->init();
@@ -212,7 +229,7 @@ function primaryLoop()
 
 primaryLoop();
 
-if ($burnBot->reconnect)
+if ($burnBot->getReconnect)
 {
     // We will only connect 5 times to a channel.  In the future, we will use DB and a controller process to start new bot sessions
     for ($i = 1; $i < $burnBot->getReconnectCounter(); $i++)
@@ -232,4 +249,6 @@ if ($connected)
     $connected = false;
     primaryLoop();
 }
+
+$irc->_log_error("Socket was closed");
 ?>

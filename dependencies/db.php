@@ -50,6 +50,11 @@ class db
     
     private function connected()
     {
+        if (!is_resource($this->db_connect_id))
+        {
+            return false;
+        }
+        
         return mysql_ping($this->db_connect_id);
     }
     

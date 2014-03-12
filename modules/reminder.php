@@ -11,11 +11,10 @@ class reminder
     protected $commandDelimeter = '';
     protected $nick = '';
     
-    protected $constructed = false;
-    
     protected $lastReminderTime = 0;
     protected $lastmessageTime = 0;
     protected $enabled = false;
+    protected $waitForActivity = true;
     protected $defaultTTL = 300;
     
     // The minimum ammount of time between reminders.  Although they will have their own limits, This stops reminders from being sent on top of each other
@@ -54,10 +53,12 @@ class reminder
             
             $this->lastReminderTime = time();
             $this->lastmessageTime  = time();
+            $this->lastLogTime      = time();
             
             // Grab base config
             $sql = $db->sql_build_select(BURNBOT_REMINDERSCONFIG, array(
-                'enabled'
+                'enabled',
+                'activity'
             ), array(
                 'id' => $this->sessionID
             ));
@@ -67,12 +68,18 @@ class reminder
             
             if (!empty($rows))
             {
-                $this->enabled = $rows['enabled'];
+                $this->enabled = ($rows['enabled'] == '1') ? true : false;
+                $this->waitForActivity = ($rows['activity'] == '1') ? true : false;
+                
+                $str = '';
+                $str .= ($this->enabled) ? 'Enabled(true) ' : 'Enabled(false) ';
+                $str .= ($this->waitForActivity) ? 'Require Activity(true)' : 'Require Activity(false)';
+                
+                $irc->_log_action("Loaded configuration: $str", 'reminders');
             } else {
                 // Create
                 $sql = $db->sql_build_insert(BURNBOT_REMINDERSCONFIG, array(
-                    'id' => $this->sessionID,
-                    'enabled' => $this->enabled
+                    'id' => $this->sessionID
                 ));
                 $result = $db->sql_query($sql);
                 $db->sql_freeresult($result);
@@ -84,7 +91,7 @@ class reminder
     
     public function init()
     {
-        global $burnBot, $db;
+        global $burnBot, $db, $irc;
         
         $time = time();
         $counter = 0;
@@ -153,11 +160,17 @@ class reminder
         }
         
         $burnBot->registerCommads($this->commands);
+        
+        $irc->_log_action('Reminder module initialized', 'init');
     }
     
     public function _read($messageArr)
     {
-        
+        if ($messageArr['type'] == 'private')
+        {
+            // Update the last time we had a message in the channel
+            $this->lastmessageTime = time();
+        }
     }
     
     // Checks the reminders que and processes it (DOES NOT STOP RUNNING EVEN IF DISABLED)
@@ -167,24 +180,28 @@ class reminder
         
         $tickStartTime = time();
         
-        // Have we joined a channel yet?
+        // Do we have everything we need to start sending reminders?
         if ((!$burnBot->getHasJoined()) || empty($this->remindersStack))
         {
             // No need to even tick yet or there are no events to run.  Just leave this now
             return;
         }
         
+        // Is there a requirement for chat activity?
+        if (($this->waitForActivity) && ($tickStartTime >= ($this->lastmessageTime + $this->messageDelayPeriod)))
+        {
+            return;
+        }
+        
         if ($tickStartTime > $this->lastReminderTime)
         {
-            // Run the top element on the stack IF we are allowed to
-            
             // Reset this in case the pointer is somewhere other than the top
             reset($this->remindersStack);
             
             $current = key($this->remindersStack);
             
             // Are we allowed to run a recurring event?
-            if ($current <= $this->lastReminderTime)
+            if ($tickStartTime >= $this->lastReminderTime)
             {
                 // Yes, check the event
                 $reminder = $this->remindersStack[$current];
@@ -205,7 +222,7 @@ class reminder
                         // Assume that it is an output
                         $output = (array_key_exists('output', $reminder)) ? $reminder['output'] : false;
                         
-                        if ($output == false)
+                        if ($output === false)
                         {
                             $irc->_log_error("Reminder or command $name not in proper format");
                         } else {
@@ -385,7 +402,7 @@ class reminder
         
         if ($ttl == false)
         {
-            $this->help('reminders_editcommand');
+            $this->help('editreminder');
             return;
         }
         
@@ -447,37 +464,51 @@ class reminder
             $split = explode(' ', $msg);
             if (($split[0] == 'enable') || ($split[0] == 'disable'))
             {
+                $chatActivity = (isset($split[1])) ? strtolower($split[1]) : false;
+                if ($chatActivity !== false)
+                {
+                    $chatActivity = (($chatActivity == 'true') || ($chatActivity == 't') || ($chatActivity == 'yes') || ($chatActivity == 'y') || ($chatActivity == 'enabled')) ? true : false;
+                } else {
+                    $chatActivity = $this->waitForActivity;
+                }
+                
                 if ($split[0] == 'enable')
                 {
                     $sql = $db->sql_build_update(BURNBOT_REMINDERSCONFIG, array(
-                        'enabled' => true
+                        'enabled' => true,
+                        'activity' => $chatActivity
                     ), array(
                         'id' => $this->sessionID
                     ));
                     $result = $db->sql_query($sql);
                     if ($result !== false)
                     {
-                        $burnBot->addMessageToQue("Reminders are enabled");
+                        $str = ($chatActivity) ? 'Reminders are enabled with chat activity required' : 'Reminders are enabled with chat activity not required';
+                        $burnBot->addMessageToQue($str);
                         $db->sql_freeresult($result);
                         
                         $this->enabled = true;
+                        $this->waitForActivity = $chatActivity;
                     } else {
                         $burnBot->addMessageToQue("An error occured while trying to enable reminders.  Please see log");
                         $db->sql_freeresult($result);
                     }
                 } else {
                     $sql = $db->sql_build_update(BURNBOT_REMINDERSCONFIG, array(
-                        'enabled' => false
+                        'enabled' => false,
+                        'activity' => $chatActivity
                     ), array(
                         'id' => $this->sessionID
                     ));
                     $result = $db->sql_query($sql);
                     if ($result !== false)
                     {
-                        $burnBot->addMessageToQue("Reminders are disabled");
+                        $str = ($chatActivity) ? 'Reminders are disabled with chat activity required' : 'Reminders are disabled with chat activity not required';
+                        $burnBot->addMessageToQue($str);
                         $db->sql_freeresult($result);
                         
                         $this->enabled = false;
+                        $this->waitForActivity = $chatActivity;
                     } else {
                         $burnBot->addMessageToQue("An error occured while trying to disable reminders.  Please see log");
                         $db->sql_freeresult($result);
@@ -728,12 +759,12 @@ class reminder
                     break;
                     
                 case 'editreminder':
-                    $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'delreminder {name} {ttl} {output}.  Edits the specified reminder with new data.  TTL is the number of seconds between reminders, this does not override the 120 second minimum between reminders');
+                    $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'editreminder {name} {ttl} {output}.  Edits the specified reminder with new data.  TTL is the number of seconds between reminders, this does not override the 120 second minimum between reminders');
                     break;
                 
                 case 'reminders':
                     $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'reminders.  Outputs the name of all currently registered commands.  Usage: ' . $this->commandDelimeter . 'reminders {name}. Retrieves information about the reminder specified');
-                    $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'reminders {enable/disable}.  Enables or disables recurring messages');
+                    $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'reminders {enable/disable} {require activity}.  Enables or disables recurring messages.  The recurring activity parameter sets weather chat activity is needed for recurring messages to be processed');
                     break;
                     
                 case 'reminders_addcommand':

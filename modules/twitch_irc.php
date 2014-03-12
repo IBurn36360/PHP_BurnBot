@@ -13,7 +13,11 @@ class twitch_irc extends twitch
         'game_gfs' => array('twitch', 'twitch_gfs', true, false, false, false),
         'twitch_updatetitle' => array('twitch', 'twitch_updatetitle', true, false, false, false),
         'twitch_updategame' => array('twitch', 'twitch_updategame', true, false, false, false),
-        'twitch_welcomesubs' => array('twitch', 'twitch_welcomesubs', true, false, false, false)
+        'twitch_welcomesubs' => array('twitch', 'twitch_welcomesubs', true, false, false, false),
+        'chatads' => array('twitch', 'twitch_chatads', true, false, false, false),
+        'addchatad' => array('twitch', 'twitch_addchatad', true, false, false, false),
+        'delchatad' => array('twitch', 'twitch_delchatad', true, false, false, false),
+        'editchatad' => array('twitch', 'twitch_editchatad', true, false, false, false)
     );
     
     protected $isTwitch = false;
@@ -159,6 +163,8 @@ class twitch_irc extends twitch
         
         // And register all commands
         $burnBot->registerCommads($this->commands);
+        
+        $irc->_log_action('Twitch module initialized', 'init');
     }
     
     public function _read($messageArr = array())
@@ -171,18 +177,18 @@ class twitch_irc extends twitch
             return;
         }
         
-        $greet = $this->config['welcome'];
-        
         $split = explode(' ', $messageArr['message']);
         $target = $split[0];
         array_shift($split);
         $message = implode(' ', $split);
+
+        $greet = preg_replace('(_SUB_)', $target, $this->config['welcome']);
         
         // Subscription event
         if (($message == 'just subscribed!') && $this->config['welcome_enabled'])
         {
             // Welcome the subscriber
-            $burnBot->addMessageToQue("$target! $greet");
+            $burnBot->addMessageToQue($greet);
             return;
         }
     }
@@ -392,7 +398,7 @@ class twitch_irc extends twitch
                 $result = $db->sql_query($sql);
                 if ($result !== false)
                 {
-                    $burnBot->addMessageToQue("Welcome message to new subscribers enabled with the following greet: $welcome");
+                    $burnBot->addMessageToQue('Welcome message to new subscribers enabled with the following greet: ' . preg_replace('(_SUB_)', '{Subscriber}', $welcome));
                     
                     // Update the config here because a fail on the query means this should stay as is
                     $this->config['welcome'] = $welcome;
@@ -436,7 +442,7 @@ class twitch_irc extends twitch
             $result = $db->sql_query($sql);
             if ($result !== false)
             {
-                $burnBot->addMessageToQue("New subscribers welcome changed to: $msg");
+                $burnBot->addMessageToQue("New subscribers welcome changed to: " . preg_replace('(_SUB_)', '{Subscriber}', $msg));
                 
                 // Update the config here because a fail on the query means this should stay as is
                 $this->config['welcome_enabled'] = false;
@@ -449,7 +455,27 @@ class twitch_irc extends twitch
         }
         
         // Nope, return the message as an example
-        $burnBot->addMessageToQue("New Subscribers greeting: $greet");
+        $burnBot->addMessageToQue("New Subscribers greeting: " . preg_replace('(_SUB_)', '{Subscriber}', $greet));
+    }
+    
+    public function twitch_chatads($sender, $msg = '')
+    {
+        
+    }
+    
+    public function twitch_addchatad($sender, $msg = '')
+    {
+        
+    }
+    
+    public function twitch_delchatad($sender, $msg = '')
+    {
+        
+    }
+    
+    public function twitch_editchatad($sender, $msg = '')
+    {
+        
     }
     
     public function help($trigger)
@@ -484,8 +510,24 @@ class twitch_irc extends twitch
                     break;
                     
                 case 'twitch_welcomesubs':
-                    $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'twitch_welcomesubs {enable/disable}.  Enables or disables subscriber welcomes.  Usage: ' . $this->commandDelimeter . 'twitch_welcomesubs {enable} {message}.  Enables the subscriber welcome message with a new message appended');
-                    $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'twitch_welcomesubs.  Outputs the currently registered welcome message');
+                    $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'twitch_welcomesubs {enable/disable}.  Enables or disables subscriber welcomes.  Usage: ' . $this->commandDelimeter . 'twitch_welcomesubs {enable} {message}.  Enables the subscriber welcome message with a new message appended.  Use "_SUB_" to define where the subscriber is mentioned');
+                    $burnBot->addMessageToQue('Usage: ' . $this->commandDelimeter . 'twitch_welcomesubs.  Outputs the currently registered welcome message.  Usage: ' . $this->commandDelimeter . 'twitch_welcomesubs {message}.  Changes the subscriber welcome message.  Use "_SUB_" to define where the subscriber is mentioned');
+                    break;
+                    
+                case 'twitch_chatads':
+                    
+                    break;
+                    
+                case 'twitch_addchatad':
+                    
+                    break;
+                    
+                case 'twitch_delchatad':
+                    
+                    break;
+                    
+                case 'twitch_editchatad':
+                    
                     break;
                 
                 default:

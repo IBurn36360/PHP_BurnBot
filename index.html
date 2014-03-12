@@ -4,35 +4,61 @@
 </head>
 <body>
 
-<form action="http://localhost:8080/burnbot/live/startup.php" method="get" target="_blank">
+<form action="http://localhost:8080/burnbot/live/startup.php" method="post" target="_blank">
 <table>
     <tr>
+        <td></td>
+        <td><span style="color: #FF0000;">* = required</span></td>
+        <td></td>
+    </tr>
+    <tr>
         <td>Host:</td>
-        <td><input type="text" name="host" required /></td>
+        <td><input type="text" name="host" required="required" /></td>
+        <td><span style="color: #FF0000;">*</span></td>
     </tr>
     <tr>
         <td>Port:</td>
-        <td><input type="text" name="port" /></td>
+        <td><input type="text" name="port" placeholder="6667" /></td>
     </tr>
     <tr>
         <td>Channel:</td>
-        <td><input type="text" name="chan" required /></td>
+        <td><input type="text" name="chan" required="required" /></td>
+        <td><span style="color: #FF0000;">*</span></td>
     </tr>
     <tr>
         <td>Nickname:</td>
-        <td><input type="text" name="nick" required /></td>
+        <td><input type="text" name="nick" required="required" /></td>
+        <td><span style="color: #FF0000;">*</span></td>
     </tr>
     <tr>
         <td>Password:</td>
         <td><input name="pass" type="password" /></td>
+        <td></td>
+    </tr>
+    <tr>
+        <td>Pre-join Command:</td>
+        <td><input name="prejoin" type="text" /></td>
+        <td></td>
+    </tr>
+    <tr>
+        <td>Post-join Command:</td>
+        <td><input name="postjoin" type="text" /></td>
+        <td></td>
     </tr>
     <tr>
         <td>Reconnect on DC:</td>
-        <td>Yes: <input type="radio" name="persist" value="1" required />No: <input type="radio" name="persist" value="0" /></td>
+        <td>Yes: <input type="radio" name="persist" value="1" required="" checked="" />No: <input type="radio" name="persist" value="0" /></td>
+        <td></td>
     </tr>
     <tr>
         <td>Read-Only:</td>
-        <td>Yes: <input type="radio" name="read_only" value="1" required />No: <input type="radio" name="read_only" value="0" /></td>
+        <td>Yes: <input type="radio" name="read_only" value="1" required="" />No: <input type="radio" name="read_only" value="0" checked="" /></td>
+        <td></td>
+    </tr>
+    <tr>
+        <td>Fresh log:</td>
+        <td>Yes: <input type="radio" name="new_log" value="1" required="" checked="" />No: <input type="radio" name="new_log" value="0" /></td>
+        <td></td>
     </tr>
 </table>
 

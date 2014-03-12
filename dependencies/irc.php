@@ -10,12 +10,31 @@ class irc
     public function connect($ircAddr, $ircPort)
     {
         // Simply open a new socket.  nothing new with that at all
-        return fsockopen($ircAddr, $ircPort);
+        $addr = @gethostbyname($ircAddr);
+        
+        $sock = @socket_create($addr, SOCK_STREAM, SOL_TCP);
+        
+        // IMPORTANT.  No NOT suppress this as it will log information as to why the connect failed
+        if (socket_connect($sock, $ircAddr, $ircPort) == false)
+        {
+            return false;
+        } else {
+            return $sock;
+        }
     }
     
-    public function read($socket, $len = 4096)
+    public function read($socket)
     {
-    	$read = fgets($socket, $len);
+        // Suppressed to stop this function from throwing thousands of errors when the socket is closed
+    	$read = @socket_read($socket, 4096, PHP_NORMAL_READ);
+        
+        if ($read != '')
+        {
+            while ((strstr($read, "\r\n") == ''))
+            {
+                $read .= @socket_read($socket, 4096, PHP_NORMAL_READ);
+            }
+        }
     	$read = rtrim($read);
     	return $read;
     }
@@ -23,17 +42,17 @@ class irc
     public function write($socket, $cmd)
     {
         // Simply write data to the socket
-        return @fputs($socket, $cmd . "\r\n");
+        return socket_write($socket, $cmd . "\r\n");
     }
     
     public function disconnect($socket)
     {
-        return @fclose($socket);
+        return @socket_close($socket);
     }
     
     public function setBlocking($socket)
     {
-        return socket_set_blocking($socket, false);
+        return @socket_set_nonblock($socket);
     }
     
     // Sends a channel message
@@ -70,6 +89,12 @@ class irc
         $type = 'system';
         $message = trim($message, ':');
         $messageArr = array();
+        
+        // Shouldn't need this, but checking either way
+        if ($message == '')
+        {
+            return $messageArr;
+        }
         
         // Do we have a private message of any kind? (This also stops people from faking server messages)
         if (preg_match('[PRIVMSG]', $message) != 0)
@@ -149,6 +174,11 @@ class irc
             // We have a system message.
             $split = explode(' ', $message);
             $type = 'system';
+            
+            if (count($split) == 1)
+            {
+                return $messageArr;
+            }
             
             // Do we have a 3 digit number for our second set?  The second check stops PING with a lag timer from tripping this
             if (isset($split[1]) && (preg_match('([0-9]{3,3})', $split[1]) != 0) && (preg_match('[ping]i', $split[0]) == 0))
@@ -305,7 +335,7 @@ class irc
                 if (preg_match('[ error ]i', $message) != 0)
                 {
                     // Link closed (For some reason the socket was closed, be sure to pass to an exit handler in this case)
-                    if (preg_match('[Closing Link]i', $message) != 0)
+                    if (strstr(strtolower($message), 'closing link') != '')
                     {
                         $messageArr = array(
                             'type' => $type,
@@ -365,28 +395,61 @@ class irc
                 {
                     // Set our values that need to be modified
                     $chan = $split[2];
-                    $mode = $split[3];
-                    if (isset($split[4]))
+                    $modes = str_split($split[3], 1);
+                    $check = $split[3]; // We need this in a bit
+                    for ($i = 0; $i <=3; $i++)
                     {
-                        $user = $split[4];
+                        array_shift($split);
                     }
+                    $users = $split;
                     
-                    if (isset($user))
+                    if (!empty($users) && (preg_match('(\+|-)', $check) != 0))
                     {
+                        $removing = ($modes[0] == '-') ? true : false;
+                        $counter = 0;
+                        $store = array();
+                        
+                        // Build our keypairs
+                        foreach ($modes as $mode)
+                        {
+                            // We are adding modes (Don't assume anything is normalized here)
+                            if ($mode == '+')
+                            {
+                                $removing = false;
+                                continue;
+                            }
+                            
+                            // We are removing modes
+                            if ($mode == '-')
+                            {
+                                $removing = true;
+                                continue;
+                            }
+                            
+                            if ($removing)
+                            {
+                                $store[] = array('nick' => $users[$counter], 'mode' => '-' . $mode);
+                                $counter++;
+                            } else {
+                                $store[] = array('nick' => $users[$counter], 'mode' => '+' . $mode);
+                                $counter++;
+                            }
+                        }
+                        
                         // Standard MODE message, proceed as normal
                         $messageArr = array(
                             'type' => $type,
                             'chan' => $chan,
-                            'mode' => $mode,
-                            'nick' => $user
+                            'modes' => $store
                         );                        
                     } else {
                         // This is a case where the mode is our default.  It doesn't have a service ID attached, so we will build the array differently here for the bot to recognize it properly
+                        
                         $messageArr = array(
                             'type' => $type,
                             'service_id' => '221',
                             'nick' => $chan,
-                            'mode' => $mode
+                            'mode' => $check
                         );
                     }
                     

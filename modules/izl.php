@@ -24,7 +24,9 @@ class izl
     
     public function init()
     {
+        global $irc;
         
+        $irc->_log_action('Izl module initialized', 'init');
     }
     
     public function _read($messageArr)
@@ -41,7 +43,7 @@ class izl
                 {
                     $nick = $messageArr['nick'];
                     
-                    $burnBot->addMessageToQue("5WARNING Webchat User Detected: IP Logged $host 5WARNING");
+                    $burnBot->addMessageToQue("5Webchat User Detected");
                 }
             }
         }
