@@ -1,6 +1,6 @@
 <?php
 // Was this accessed directly?  If so, exit.
-if (!defined('IN_IRC'))
+if (!defined('IN_PHPBURNBOT'))
 {
 	exit;
 }
@@ -196,7 +196,7 @@ class twitch
      * 
      * @return $result - [mixed] The raw return of the resulting query or the numerical status
      */
-    private function cURL_get($url, array $get = array(), array $options = array(), $returnStatus = false)
+    protected function cURL_get($url, array $get = array(), array $options = array(), $returnStatus = false)
     {
         global $twitch_configuration, $twitch_clientKey;
         $functionName = 'GET';

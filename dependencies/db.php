@@ -1,197 +1,225 @@
 <?php
 // Was this accessed directly?  If so, exit.
-if (!defined('IN_IRC'))
+if (!defined('IN_PHPBURNBOT'))
 {
 	exit;
 }
 
-// This is basically a very stripped down version of phpBB's DBAL (DataBase Abstraction Layer)
-// All of the cache information and processes are gone and multi-database compatability is gone
-// The way this is coded, you can plug this direction into phpBB's DBAL with no issues for compatability with ANY SQL DB type
-class db
-{
-	var $db_connect_id;
-	var $query_result;
+final class db {
+    protected $link;
+    protected $hostname;
+    protected $port;
+    protected $username;
+    protected $password;
+    protected $database;
     
-	var $persistency = true;
-	var $user = '';
-	var $server = '';
-	var $dbname = '';
-    var $dbport = '';
-    var $newlink = true;
-    
-    // Since we are going to reconnect, we need to know this.  Store as a private var
-    private $dbpass = '';
-    
-    public function sql_connect($sqlserver, $sqluser, $sqlpassword, $database, $port = false, $persistency = false, $new_link = false)
+    public function __construct($hostname, $port, $username, $password, $database)
     {
-		$this->persistency = $persistency;
-		$this->user = $sqluser;
-		$this->server = $sqlserver . (($port) ? ':' . $port : '');
-		$this->dbname = $database;
-        $this->dbport = ($port) ? $port : false;
-        $this->newLink = $new_link;
+        $this->hostname = (stristr($hostname, 'localhost') ? '127.0.0.1' : $hostname);
+        $this->port     = intval($port);
+        $this->username = $username;
+        $this->password = $password;
+        $this->database = $database;
         
-        $this->db_connect_id = ($this->persistency) ? @mysql_pconnect($this->server, $this->user, $sqlpassword) : @mysql_connect($this->server, $this->user, $sqlpassword, $new_link);
-        
-        if ($this->db_connect_id && $this->dbname != '')
-        {
-            // Attempt to select our DB
-            if (@mysql_select_db($this->dbname, $this->db_connect_id))
-            {
-                // Return our link
-                return $this->db_connect_id;
-            }
-        }
-        
-        // Generic return, will be populated with data from sql_error()
-        return $this->sql_error('');
+        $this->connect();
     }
     
-    private function connected()
-    {
-        if (!is_resource($this->db_connect_id))
-        {
-            return false;
-        }
-        
-        return mysql_ping($this->db_connect_id);
+    /**
+     * Connects to a MySQL database and sets the database
+     */
+    public function connect() {
+        $this->link = new mysqli('p:' . $this->hostname, $this->username, $this->password, $this->database, $this->port, 'mysql');
+
+		if (mysqli_connect_error()) {
+			trigger_error(mysqli_connect_errno() . ':' . mysqli_connect_error() . ' [Could not make a database link]');
+		}
+
+		$this->link->set_charset('utf8');
+		$this->link->query('SET SQL_MODE = \'\'');
     }
     
-    public function sql_query($query = '')
+    /**
+     * Performs a MySQL query, grabbing all rows and cleaning memory after
+     * 
+     * @param $sql[string] - String SQL query to perform
+     * 
+     * @return $query[object] - Object all data, including all returned rows from the query.  Returns true is query failed
+     * 
+     * @return $query->row[array] - Array(Indexed) all data from first row return
+     * @return $query->rows[array] - Nested array of all returned rows
+     * @return $query->num_rows[int] - Int number of returned rows
+     * @return $query->error[string] - The error output from the query if there was an issue
+     */
+    public function query($sql) 
     {
-        // Do we have a connection to the DB right now?
         if (!$this->connected())
         {
-            // Reconnect here
-            $this->sql_connect($this->server, $this->user, $this->dbpass, $this->dbname, $this->dbport, $this->persistency, $this->newlink);
+            $this->connect();
         }
         
-        if ($query != '')
+        if ($this->connected())
         {
-            // Okay, perform the query and store it in query_result
-            if (($this->query_result = @mysql_query($query, $this->db_connect_id)) === false)
-            {
-                $this->sql_error($query);
-            }
-        } else {
-            return false;
+            $query = $this->link->query($sql);
+
+    		if (!$this->link->errno){
+    			if (isset($query->num_rows)) {
+    				$data = array();
+    
+    				while ($row = $query->fetch_assoc()) {
+    					$data[] = $row;
+    				}
+    
+    				$result = new stdClass();
+    				$result->numRows = $query->num_rows;
+    				$result->row = isset($data[0]) ? $data[0] : array();
+    				$result->rows = $data;
+                    $result->error = '';
+    
+    				unset($data);
+    
+    				$query->close();
+    
+    				return $result;
+    			} else{
+    				return true;
+    			}
+    		} else {
+                $result = new stdClass();
+                $result->numRows = 0;
+                $result->row = array();
+                $result->rows = array();
+                $result->error = $this->link->errno . ':' . $this->link->error . " [$sql]";
+                
+                // Trigger an error here so that it logs no matter what
+                trigger_error($result->error);
+                
+    			return $result;
+    		}
         }
         
-        return $this->query_result;
+        $result = new stdClass();
+        $result->numRows = 0;
+        $result->row = array();
+        $result->rows = array();
+        $result->error = 'Error: No database link has been found';
+        
+        // Trigger an error here so that it logs no matter what
+        trigger_error($result->error);
+        
+		return $result;
     }
     
-   	public function sql_affectedrows()
-	{
-		return ($this->db_connect_id) ? @mysql_affected_rows($this->db_connect_id) : false;
-	}
+    /**
+     * Escapes a value to be safe for MySQL queries
+     * 
+     * @param $value[mixed] - The value to be escaped
+     * 
+     * @return $escaped[string] - The escaped value, safe for MySQL queries
+     */
+    public function escape($value) 
+    {
+    	return $this->link->real_escape_string($value);
+    }
     
- 	public function sql_fetchrow($query_id = false)
-	{
-		if ($query_id === false)
+    /**
+     * Counts the affected rows of the last MySQl query
+     * 
+     * @return $rows[int] - Number of affected rows
+     */
+    public function countAffected() 
+    {
+    	return $this->link->affected_rows;
+    }
+    
+    /**
+     * Gets the last ID generated from the last INSERT query
+     * 
+     * @return $id[int] - The last ID generated
+     */
+    public function getLastId() 
+    {
+    	return $this->link->insert_id;
+    }
+    
+    /**
+     * Checks if a table exists in the current DB
+     * 
+     * @param $table[string] - String table name to check for
+     * 
+     * @return $exists[bool] - Bool table exists
+     */
+    public function tebleExists($table)
+    {
+        return ($this->query('SELECT 1 FROM ' . $table . ';') !== false) ? true : false;
+    }
+    
+    /**
+     * Valudates a value for a MySQL query and prepares it for the operation
+     * 
+     * @param $var[mixed] - The value to validate
+     * 
+     * @return $validated[mixed] - The validated value for prepared queries
+     */
+    protected function validateValue($var)
+    {
+		if (is_null($var))
 		{
-			$query_id = $this->query_result;
+			return 'NULL';
+		} else if (is_string($var)) {
+			return '\'' . $this->escape($var) . '\'';
+		} else {
+			return (is_bool($var)) ? intval($var) : $var;
 		}
-
-		return ($query_id !== false) ? @mysql_fetch_assoc($query_id) : false;
-	}
+    }
     
-	public function sql_fetchrowset($query_id = false)
-	{
-		if ($query_id === false)
-		{
-			$query_id = $this->query_result;
-		}
-
-		if ($query_id !== false)
-		{
-			$result = array();
-			while ($row = $this->sql_fetchrow($query_id))
-			{
-				$result[] = $row;
-			}
-
-			return $result;
-		}
-
-		return false;
-	}
+    /**
+     * Checks of the MySQL database connection is still alive
+     * 
+     * @return $connected[bool] - Weather or not the database is still connected
+     */
+    public function connected()
+    {
+        return $this->link->ping();
+    }
     
-	public function sql_rowseek($rownum, &$query_id)
-	{
-		if ($query_id === false)
-		{
-			$query_id = $this->query_result;
-		}
-
-		return ($query_id !== false) ? @mysql_data_seek($query_id, $rownum) : false;
-	}
+    // Query constructors
     
-    public function sql_nextid()
-	{
-		return ($this->db_connect_id) ? @mysql_insert_id($this->db_connect_id) : false;
-	}
-    
-    public function sql_freeresult($query_id = false)
-	{
-		if ($query_id === false)
-		{
-			$query_id = $this->query_result;
-		}
-
-		return ($query_id !== false) ? @mysql_free_result($query_id) : false ;
-	}
-    
-    public function sql_escape($msg)
-	{
-		if (!$this->db_connect_id)
-		{
-			return @mysql_real_escape_string($msg);
-		}
-
-		return @mysql_real_escape_string($msg, $this->db_connect_id);
-	}
-    
-    private function sql_error()
-	{
-	   global $irc;
-       
-		if (!$this->db_connect_id)
-		{
-            $irc->_log_error(@mysql_error() . ':' . @mysql_errno());
-            return;
-		}
-
-        $irc->_log_error(@mysql_error($this->db_connect_id) . ':' . @mysql_errno($this->db_connect_id));
-        return;
-	}
-    
-    public function sql_close()
-	{
-		return @mysql_close($this->db_connect_id);
-	}
-    
-    public function sql_build_insert($table, $sql_ary)
+    /**
+     * Constructs a safe INSERT query, valudating all values
+     * 
+     * @param (string)$table - Target table for the query
+     * @param (array)$sql_ary - Keyed array of all data to insert into the target table
+     * 
+     * @return (string)$sql - Constructed and sanitized SQL query
+     */
+    public function buildInsert($table, $sql_ary)
     {
         $ary = array();
 		foreach ($sql_ary as $id => $value)
 		{
-            $ary[] = $this->sql_validate_value($value);
+            $ary[] = $this->validateValue($value);
 		}
 
-		return 'INSERT INTO ' . $table . ' ' . ' (' . implode(',', array_keys($sql_ary)) . ') VALUES (' . implode(',', $ary) . ');';
-    }			
-
+		return 'INSERT INTO ' . $table . ' (' . implode(',', array_keys($sql_ary)) . ') VALUES (' . implode(',', $ary) . ');';
+    }
     
-    public function sql_build_update($table, $update, $conditions = array())
+    /**
+     * Constructs a safe UPDATE query, valudating all values
+     * 
+     * @param (string)$table - Target table for the query
+     * @param (array)$update - Keyed array of all data to update in the target table
+     * @param (array)$conditions - Keyed array of conditions for the update
+     * 
+     * @return (string)$sql - Constructed and sanitized SQL query
+     */
+    public function buildUpdate($table, $update, $conditions = array())
     {
-        // Start by breaking down the array of parameters
         $set = '';
         $condition = '';
         
         foreach ($update as $collumn => $value)
         {
-            $set .= $this->sql_escape($collumn) . "=" . $this->sql_validate_value($value) . ",";
+            $set .= $this->escape($collumn) . '=' . $this->validateValue($value) . ',';
         }
         
         $set = rtrim($set, ',');
@@ -200,31 +228,37 @@ class db
         {
             foreach ($conditions as $collumn => $value)
             {
-                // Cheap way of getting the AND in there
                 if ($condition != '')
                 {
                     $condition .= ' AND ';
                 }
                 
-                $condition .= $this->sql_escape($collumn) . "=" . $this->sql_validate_value($value) . "";
+                $condition .= $this->escape($collumn) . '=' . $this->validateValue($value);
             }
         }
         
-        // Build the query and return it
-        $sql = ($condition != '') ? "UPDATE " . $this->sql_escape($table) . " SET $set WHERE $condition;" : "UPDATE " . $this->sql_escape($table) . " SET $set;";
+        $sql = ($condition != '') ? 'UPDATE ' . $this->escape($table) . " SET $set WHERE $condition;" : 'UPDATE ' . $this->escape($table) . " SET $set;";
         
         return $sql;
     }
     
-    public function sql_build_select($table, $select, $conditions = array())
+    /**
+     * Constructs a safe SELECT query, validating all values
+     * 
+     * @param (string)$table - Target table for the query
+     * @param (array)$select - Unkeyed array of all collumns to select
+     * @param (array)$conditions - Keyed array of conditions for the select
+     * 
+     * @return (string)$sql - Constructed and sanitized SQL query
+     */
+    public function buildSelect($table, $select, $conditions = array())
     {
-        // Start by breaking down the array of parameters
         $selectStr = '';
         $condition = '';
         
         foreach ($select as $collumn)
         {
-            $selectStr .= $this->sql_escape($collumn) . ',';
+            $selectStr .= $this->escape($collumn) . ',';
         }
         
         $selectStr = rtrim($selectStr, ',');
@@ -233,23 +267,29 @@ class db
         {
             foreach ($conditions as $collumn => $value)
             {
-                // Cheap way of getting the AND in there
                 if ($condition != '')
                 {
                     $condition .= ' AND ';
                 }
                 
-                $condition .= $this->sql_escape($collumn) . "=" . $this->sql_validate_value($value) . "";
+                $condition .= $this->escape($collumn) . "=" . $this->validateValue($value) . "";
             }
         }
         
-        // Build and return
-        $sql = ($condition != '') ? "SELECT $selectStr FROM "  . $this->sql_escape($table) . " WHERE $condition;" : "SELECT $selectStr FROM "  . $this->sql_escape($table) . ";" ;
+        $sql = ($condition != '') ? "SELECT $selectStr FROM "  . $this->escape($table) . " WHERE $condition;" : "SELECT $selectStr FROM "  . $this->escape($table) . ';' ;
 
         return $sql;
     }
     
-    public function sql_build_delete($table, $conditions = array())
+    /**
+     * Constructs a safe DELETE query, valudating all values
+     * 
+     * @param (string)$table - Target table for the query
+     * @param (array)$conditions - Keyed array of conditions for the delete
+     * 
+     * @return (string)$sql - Constructed and sanitized SQL query
+     */
+    public function buildDelete($table, $conditions = array())
     {
         $condition = '';
         
@@ -257,36 +297,18 @@ class db
         {
             foreach ($conditions as $collumn => $value)
             {
-                // Cheap way of getting the AND in there
                 if ($condition != '')
                 {
                     $condition .= ' AND ';
                 }
                 
-                $condition .= $this->sql_escape($collumn) . "=" . $this->sql_validate_value($value) . "";
+                $condition .= $this->escape($collumn) . '=' . $this->validateValue($value);
             }
         }
         
-        // Build and return
-        $sql = ($condition != '') ? "DELETE FROM "  . $this->sql_escape($table) . " WHERE $condition;" : "DELETE FROM "  . $this->sql_escape($table) . ";" ;
+        $sql = ($condition != '') ? 'DELETE FROM '  . $this->escape($table) . " WHERE $condition;" : 'DELETE FROM '  . $this->escape($table) . ';';
 
         return $sql;
     }
-    
-	function sql_validate_value($var)
-	{
-		if (is_null($var))
-		{
-			return 'NULL';
-		}
-		else if (is_string($var))
-		{
-			return "'" . $this->sql_escape($var) . "'";
-		}
-		else
-		{
-			return (is_bool($var)) ? intval($var) : $var;
-		}
-	}
 }
 ?>

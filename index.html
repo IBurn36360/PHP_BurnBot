@@ -4,7 +4,7 @@
 </head>
 <body>
 
-<form action="http://localhost:8080/burnbot/live/startup.php" method="post" target="_blank">
+<form action="http://localhost/burnbot/startup.php" method="post" target="_blank" enctype="application/x-www-form-urlencoded" autocomplete="on">
 <table>
     <tr>
         <td></td>
@@ -53,11 +53,6 @@
     <tr>
         <td>Read-Only:</td>
         <td>Yes: <input type="radio" name="read_only" value="1" required="" />No: <input type="radio" name="read_only" value="0" checked="" /></td>
-        <td></td>
-    </tr>
-    <tr>
-        <td>Fresh log:</td>
-        <td>Yes: <input type="radio" name="new_log" value="1" required="" checked="" />No: <input type="radio" name="new_log" value="0" /></td>
         <td></td>
     </tr>
 </table>

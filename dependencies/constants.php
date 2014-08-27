@@ -1,40 +1,55 @@
 <?php
 // State var
-define('IN_IRC', true);
+define('IN_PHPBURNBOT', true);
 
-// Database vars
+// Base constants
+define('DB_PREFIX',     'bb_');
+define('DB_MOD_PREFIX', DB_PREFIX . 'mod_');
 
-// Commands
-define('BURNBOT_COMMANDS', 'commands');
-define('BURNBOT_COMMANDS_CONFIG', 'commands_config');
+/** @@@@@@@@@@@@@@@@@@@@@@@@@@@@
+ *       Core and Webpanel
+ *  @@@@@@@@@@@@@@@@@@@@@@@@@@@@*/
 
-// Connections
-define('BURNBOT_CONNECTIONS', 'connections');
+// Authentication and webpanel
+define('BURNBOT_WEBPANEL_ACCESSES',      DB_PREFIX . 'webpanel_accesses');
+define('BURNBOT_WEBPANEL_LOGINS',        DB_PREFIX . 'webpanel_logins');
+define('BURNBOT_WEBPANEL_REGISTRATIONS', DB_PREFIX . 'webpanel_registrations');
+define('BURNBOT_WEBPANEL_SESSIONS',      DB_PREFIX . 'webpanel_sessions');
+
+// Core
+define('BURNBOT_CORE_CONNECTIONS',       DB_PREFIX . 'core_connections');
+define('BURNBOT_CORE_COMMANDS',          DB_PREFIX . 'core_commands');
+define('BURNBOT_CORE_GLOBAL_APIKEYS',    DB_PREFIX . 'core_api_keys');
+define('BURNBOT_CORE_MODULES',           DB_PREFIX . 'core_modules');
+define('BURNBOT_CORE_REGULARS',          DB_PREFIX . 'core_regulars');
+
+/** @@@@@@@@@@@@@@@@@@@@@@@@@@@@
+ *           Modules
+ *  @@@@@@@@@@@@@@@@@@@@@@@@@@@@*/
+
+// Channel
+define('BURNBOT_MODULE_CHANNEL_COMMANDS',     DB_MOD_PREFIX . 'channel_commands');
 
 // Moderation
-define('BURNBOT_MODERATION_CONFIG', 'moderation_config');
-define('BURNBOT_MODERATION_ENDERS', 'moderation_url_enders');
-define('BURNBOT_MODERATION_RESPONSES', 'moderation_responses');
-define('BURNBOT_MODERATION_TWITCHGLOBAL', 'moderation_twitchglobal');
-define('BURNBOT_MODERATION_WORDS', 'moderation_words');
+define('BURNBOT_MODULE_MODERATION_CONFIG',    DB_MOD_PREFIX . 'moderation_config');
+define('BURNBOT_MODULE_MODERATION_ENDERS',    DB_MOD_PREFIX . 'moderation_enders');
+define('BURNBOT_MODULE_MODERATION_RESPONSES', DB_MOD_PREFIX . 'moderation_responses');
+define('BURNBOT_MODULE_MODERATION_WORDS',     DB_MOD_PREFIX . 'moderation_words');
 
-// Modules
-define('BURNBOT_MODULES_CONFIG', 'modules_config');
-
-// Modules
-define('BURNBOT_REGULARS', 'regulars');
-define('BURNBOT_API_KEYS', 'api_keys');
+// Nick Protection
+define('BURNBOT_MODULE_NICKPROTECT_NICKS',    DB_MOD_PREFIX . 'nickprotect_nicks');
 
 // Rainwave
-define('BURNBOT_RAINWAVE_CONFIG', 'rainwave_config');
+define('BURNBOT_MODULE_RAINWAVE_CONFIG',      DB_MOD_PREFIX . 'rainwave_config');
 
 // Reminders
-define('BURNBOT_REMINDERS', 'reminders');
-define('BURNBOT_REMINDERSCOMMANDS', 'reminders_commands');
-define('BURNBOT_REMINDERSCONFIG', 'reminders_config');
+define('BURNBOT_MODULE_REMINDERS_CONFIG',     DB_MOD_PREFIX . 'reminders_config');
+define('BURNBOT_MODULE_REMINDERS_REMINDERS',  DB_MOD_PREFIX . 'reminders_reminders');
 
 // Twitch
-define('BURNBOT_TWITCHCODES', 'twitch_codes');
-define('BURNBOT_TWITCHCONFIG', 'twitch_config');
-define('BURNBOT_TWITCHLOGINS', 'twitch_logins');
+define('BURNBOT_MODULE_TWITCH_CHATADS',       DB_MOD_PREFIX . 'twitch_chatads');
+define('BURNBOT_MODULE_TWITCH_CODES',         DB_MOD_PREFIX . 'twitch_codes');
+define('BURNBOT_MODULE_TWITCH_CONFIG',        DB_MOD_PREFIX . 'twitch_config');
+define('BURNBOT_MODULE_TWITCH_GLOBALBAN',     DB_MOD_PREFIX . 'twitch_globalban');
+define('BURNBOT_MODULE_TWITCH_LOGINS',        DB_MOD_PREFIX . 'twitch_logins');
 ?>
