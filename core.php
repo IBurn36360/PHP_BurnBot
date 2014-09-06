@@ -54,8 +54,8 @@ final class burnbot
     // Records
     protected $commandDelimeter      = '!';
     protected $overrideKey           = '';
-    protected $topic                 = '';
-    protected $build                 = 146;
+    protected $topic                 = 'Topic message was not send on JOIN';
+    protected $build                 = 185;
     protected $lastSendTime          = 0;
     protected $tickStartTime         = 0;
     protected $tickCurrentTime       = 0;
@@ -224,6 +224,14 @@ final class burnbot
             'user_layer_1' => true,
             'user_layer_2' => false
         ),
+        'topic' => array(
+            'function'     => 'core_topic',
+            'module'       => 'core',
+            'operator'     => false,
+            'regular'      => false,
+            'user_layer_1' => true,
+            'user_layer_2' => false
+        ),
         
         // User commands
         'source' => array(
@@ -294,7 +302,8 @@ final class burnbot
         
         // Grab the session ID
         $sql = $this->db->buildSelect(BURNBOT_CORE_CONNECTIONS, array(
-            'id'
+            'id',
+            'command_delim'
         ), array(
             'host' => $this->host,
             'channel' => $this->chan
@@ -304,6 +313,7 @@ final class burnbot
         if (isset($result->numRows) && $result->numRows)
         {
             $this->sessionID = $result->row['id'];
+            $this->commandDelimeter = $result->row['command_delim'];
         } elseif ($result->error != '') {
             $this->logger->logError($result->error);
             
@@ -320,6 +330,7 @@ final class burnbot
         }
         
         $this->logger("Session ID set as: $this->sessionID", 32, 'core');
+        $this->logger("Command delimeter set as: $this->commandDelimeter", 32, 'core');
     }
     
     /**
@@ -433,7 +444,7 @@ final class burnbot
                     $this->loadedModules[$row['module']]['enabled'] = (($row['enabled'] == 1) ? true : false);
                     $this->logger('Module [' . $row['module'] . '] has been ' . (($row['enabled'] == 1) ? '[enabled]' : '[disabled]'), 32, 'core');
                 } else {
-                    $this->logger('Setting found for non-existant module [' . $row['module'] . ']', 32, 'core');
+                    $this->logger('Setting found for non-existant module [' . $row['module'] . '] Enabled: ' . (($row['enabled'] == 1) ? '[enabled]' : '[disabled]'), 32, 'core');
                 }
             }
         }
@@ -519,16 +530,6 @@ final class burnbot
     public function getNick()
     {
         return $this->nick;
-    }
-    
-    /**
-     * Gets the database object
-     * 
-     * @return $db[object] - Database class object (Initialized)
-     */
-    public function getDb()
-    {
-        return $this->db;
     }
     
     /**
@@ -939,8 +940,6 @@ final class burnbot
             
             $this->irc->write("USER $this->nick i * BurnbotV$this->version.$this->build@$this->nick");
             $this->logger("USER $this->nick i * BurnbotV$this->version.$this->build@$this->nick", 16, 'outgoing');
-            
-            $this->hasAuthd = true;
         }
     }
     
@@ -954,6 +953,7 @@ final class burnbot
             foreach ($this->preJoin as $command)
             {
                 $this->irc->write($command);
+                $this->logger("Sending message to peer: [$command]", 32, 'core');
             }
             
             usleep(1000000);
@@ -1028,6 +1028,10 @@ final class burnbot
         
         // Some other arrays need to be reset as well
         $this->messageQue    = array();
+        
+        // Finally, reset state vars as well
+        $this->hasAuthd  = false;
+        $this->hasJoined = false;
         
         // This period is here to allow some socket connections to close.  We have had a habbit of acting too fast in the past
         usleep(15000000);
@@ -1227,10 +1231,16 @@ final class burnbot
                     $this->logger('User [' . $messageArr['nick'] . '] has joined and has been added to userlist', 128, 'core');
                 }
                 
-                if (isset($messageArr['is_part']) || isset($messageArr['is_quit']) || isset($messageArr['is_kick']))
+                if (isset($messageArr['is_part']) || isset($messageArr['is_quit']))
                 {
                     $this->logger($messageArr['raw'], 8, 'incoming');
                     $this->removeFromAll(array($messageArr['nick']));
+                }
+                
+                if (isset($messageArr['is_kick']))
+                {
+                    $this->logger($messageArr['raw'], 8, 'incoming');
+                    $this->removeFromAll(array($messageArr['target']));
                 }
                 
                 if (isset($messageArr['is_notice']))
@@ -1259,15 +1269,6 @@ final class burnbot
                     {
                         switch ($mode['mode'])
                         {
-                            // Default mode case
-                            case '+i':
-                                if ($mode['nick'] == $this->nick)
-                                {
-                                    $this->join();
-                                }
-                            
-                                break;
-                            
                             // Operator
                             case '+o':
                             case '+h':
@@ -1335,21 +1336,24 @@ final class burnbot
                     // Switch the service ID and do our tasks
                     switch($messageArr['service_id'])
                     {
-                        // Welcome message, move to our read/write speed
+                        // Welcome message, move to our read/write speed and succeed authentication
                         case '001':
                             $this->tickLimiter = $this->tickLimiterLimitless;
                             $this->logger('Read/Write speed restriction removed', 32, 'core');
+                            $this->hasAuthd = true;
                         
                             break;
                             
                         case '331':
                             $this->topic = 'No topic has been set for this channel';
+                            $this->logger("Topic set as: $this->topic", 32, 'core');
                             $this->hasJoined = true;
                         
                             break;
                             
                         case '332':
                             $this->topic = $messageArr['message'];
+                            $this->logger("Topic set as: $this->topic", 32, 'core');
                             $this->hasJoined = true;
                         
                             break;
@@ -1362,6 +1366,7 @@ final class burnbot
                             
                         case '366':
                             $this->tickLimiter = $this->tickLimiterPostAuth;
+                            $this->hasJoined = true;
                             
                             break;
                             
@@ -1369,6 +1374,7 @@ final class burnbot
                         case '376':
                             $this->tickLimiter = $this->tickLimiterPostAuth;
                             $this->logger('Read/Write speed changed to post-authentication speed', 32, 'core');
+                            $this->join();
                             
                             break;
                             
@@ -1377,13 +1383,12 @@ final class burnbot
                         case '432':
                         case '433':
                         case '436':
-                            if ($this->hasJoined)
+                            if (!$this->hasAuthd)
                             {
                                 // Feedback that the requested nick isn't available
                                 $this->addMessageToQue("Nick was rejected by server: " . $messageArr['message']);
                             } else {
                                 $this->nick .= '_';
-                                $this->hasAuthd = false;
                                 $this->auth();
                             }
                         
@@ -1568,7 +1573,7 @@ final class burnbot
      * @param $trigger[string] - The command trigger that was sent
      * @param $args[array] - Array of words provided with the command
      */
-    protected function runCommand($sender, $trigger, $args)
+    public function runCommand($sender, $trigger, $args)
     {
         if (!in_array($trigger, $this->blacklistedCommands) && $this->checkPermission($trigger, $sender))
         {
@@ -1681,7 +1686,6 @@ final class burnbot
         $this->userlist      = array_diff($this->userlist, $users);
         $this->overrideUsers = array_diff($this->overrideUsers, $users);
         $this->operators     = array_diff($this->operators, $users);
-        $this->regulars      = array_diff($this->regulars, $users);
         $this->userLayer1    = array_diff($this->userLayer1, $users);
         $this->userLayer2    = array_diff($this->userLayer2, $users);
     }
@@ -1715,6 +1719,18 @@ final class burnbot
             // Run ticking operations
             $this->read();
             $this->processMessageQue();
+            
+            // Now tick every module
+            if ($this->hasAuthd && $this->hasJoined)
+            {
+                foreach ($this->loadedModules as $module => $arr)
+                {
+                    if (($module != 'core') && $arr['enabled'])
+                    {
+                        $this->modules->{$module}->tick();
+                    }
+                }
+            }
             
             // Check to see if we need to send a PING to our peer
             if ($this->hasAuthd && $this->hasJoined && ($this->lastPingTime <= ($tickTime - $this->pingIntervalTime)) && ($this->lastPongTime <= ($tickTime - $this->pingIntervalTime)) && ($this->lastSentPingTime <= ($tickTime - $this->pingIntervalTime)))
@@ -2550,6 +2566,14 @@ final class burnbot
                 }
             }
         }
+    }
+    
+    /**
+     * Passes the channel topic to the channel if there was one
+     */
+    protected function core_topic($sender, $args = array())
+    {
+        $this->addMessageToQue($this->topic);
     }
     
     /**

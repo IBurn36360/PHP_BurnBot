@@ -8,7 +8,7 @@ if (!defined('IN_PHPBURNBOT'))
 class reminders
 {
     // Module vars
-    protected $version = '1.0.8';
+    protected $version = '1.0.10';
     protected $requiredCoreVersion = '2.0';
     protected $name = 'Reminders';
     protected $author = 'Anthony \'IBurn36360\' Diaz';
@@ -277,7 +277,7 @@ class reminders
         {
             $time = time();
             
-            if (($time >= ($this->lastReminderTime + $this->reminderDelayPeriod)) && (!$this->requireChatActivity || ($this->requireChatActivity && ($this->lastMessageTime >= ($time = $this->chatActivityDelay)))))
+            if (!empty($this->reminders) && ($time >= ($this->lastReminderTime + $this->reminderDelayPeriod)) && (!$this->requireChatActivity || ($this->requireChatActivity && ($this->lastMessageTime >= ($time = $this->chatActivityDelay)))))
             {
                 // Check the reminders stack to see if there is a reminder waiting to be processed
                 $reminder = reset($this->remindersQue);
@@ -469,7 +469,7 @@ class reminders
                 $this->burnBot->addMessageToQue("The reminder [$reminder] is not registered, please choose another one for information on that reminder.");
             }
         } else {
-            $this->burnBot->addMessageToQue('Current registered reminders: [' . implode(', ', array_keys($this->reminders)) . ']');
+            $this->burnBot->addMessageToQue('Current registered reminders: [' . ((empty($this->reminders)) ? 'No currently registered reminders' : implode(', ', array_keys($this->reminders))) . ']');
         }
     }
     

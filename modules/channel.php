@@ -17,7 +17,7 @@ if (!defined('IN_PHPBURNBOT'))
 final class channel
 {
     // Module vars
-    protected $version = '1.0.42';
+    protected $version = '1.0.43';
     protected $requiredCoreVersion = '2.0';
     protected $name = 'channel';
     protected $author = 'Anthony \'IBurn36360\' Diaz';
@@ -130,6 +130,11 @@ final class channel
     }
     
     public function read($messageArr = array())
+    {
+        
+    }
+    
+    public function tick()
     {
         
     }

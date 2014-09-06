@@ -5,11 +5,11 @@ if (!defined('IN_PHPBURNBOT'))
 	exit;
 }
 
-// A fun module requested by a user to scare people on webclients.  Would only run if enabled, so is disabled by default.
+// A module designed to capture nicknames in the case where a nickserv is not protecting them.
 class nickprotect
 {
     // Module vars
-    protected $version = '1.0.7';
+    protected $version = '1.0.9';
     protected $requiredCoreVersion = '2.0';
     protected $name = 'NickProtect';
     protected $author = 'Anthony \'IBurn36360\' Diaz';
@@ -151,7 +151,7 @@ class nickprotect
     
     public function read($messageArr = array())
     {
-        if (($messageArr['type'] === 'service') && (isset($messageArr['is_part']) || (isset($messageArr['is_quit']) && !strstr($messageArr['message'], 'NETSPLIT'))))
+        if (($messageArr['type'] === 'service') && (isset($messageArr['is_part']) || (isset($messageArr['is_quit']) && !stristr($messageArr['reason'], '*.net *.split'))))
         {
             // Are we protecting a nick and have not already reserved one?
             if (in_array($messageArr['nick'], $this->protectedNicks) && !in_array(($this->burnBot->getNick()), $this->protectedNicks))
@@ -204,7 +204,7 @@ class nickprotect
             
             if (in_array($nick, $this->protectedNicks))
             {
-                $sql = $this->db->buildInsert(BURNBOT_MODULE_NICKPROTECT_NICKS, array(
+                $sql = $this->db->buildDelete(BURNBOT_MODULE_NICKPROTECT_NICKS, array(
                     'id' => $this->sessionID,
                     'nick' => $nick
                 ));

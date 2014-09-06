@@ -73,9 +73,9 @@ class irc
                 {
                     $read .= socket_read($this->sock, 4096, PHP_NORMAL_READ);
                 }
-                
-                $read = rtrim($read, "\r\n");
             }
+            
+            $read = rtrim($read, "\r\n");
         }
         
     	return (((!isset($read)) || $read === false) ? '' : $read);
@@ -128,7 +128,7 @@ class irc
      */
     public function getLastError()
     {
-        return socket_last_error($this->sock);
+        return (is_resource($this->sock)) ? socket_last_error($this->sock) : 0;
     }
     
     /**
@@ -138,7 +138,7 @@ class irc
      */
     public function getLastErrorStr()
     {
-        return socket_strerror(socket_last_error($this->sock));
+        return (is_resource($this->sock)) ? socket_strerror(socket_last_error($this->sock)) : 'The socket resource is no longer valid';
     }
   
     /**
@@ -247,6 +247,21 @@ class irc
                 // Serive ID is attached to the message.  Switch and break up
                 switch ($parts[4])
                 {
+                    // Topic
+                    case '332':
+                        $prts = explode(':', $parts[6]);
+                        $channel = array_shift($prts);
+                    
+                        $messageArr = array(
+                            'type'       => 'system',
+                            'service_id' => $parts[4],
+                            'issuer'     => $parts[1],
+                            'target'     => $channel,
+                            'message'    => implode(':', $prts),
+                            'raw'        => $message
+                        );
+                    
+                        break;
                     
                     case '353': // NAMES list
                         $prts = explode(':', $parts[6]);
@@ -343,13 +358,18 @@ class irc
                     'raw'      => $message
                 );
             } elseif (stristr($parts[4], 'kick')) {
+                $prts = explode(':', $parts[6]);
+                $target = rtrim(array_shift($prts), ' ');
+                
                 $messageArr = array(
                     'type'     => 'system',
                     'is_kick'  => true,
                     'nick'     => $parts[1],
                     'ident'    => $parts[2],
                     'hostname' => $parts[3],
-                    'reason'   => $parts[6],
+                    'chan'     => $parts[5],
+                    'target'   => $target,
+                    'reason'   => implode(':', $prts),
                     'raw'      => $message
                 );
             } elseif (stristr($parts[4], 'ping')) {

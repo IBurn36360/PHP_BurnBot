@@ -13,7 +13,7 @@ class izl
     protected $requiredCoreVersion = '2.0';
     protected $name = 'Izl';
     protected $author = 'Anthony \'IBurn36360\' Diaz';
-    protected $moduleDescription = 'Custom module for irc.quakenet.org/#izlsnizzt';
+    protected $moduleDescription = 'Custom module for irc://irc.quakenet.org/#izlsnizzt';
     protected $dependencies = array();
     
     protected $burnBot;
@@ -26,7 +26,7 @@ class izl
         {
             $burnBot->registerModule(array('Izl' => array(
                 'class' => 'izl',
-                'enabled' => false
+                'enabled' => true
             )));
         } else {
             $this->burnBot = &$burnBot;
