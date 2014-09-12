@@ -5,7 +5,17 @@ if (!defined('IN_PHPBURNBOT'))
 	exit;
 }
 
-class reminders
+/**
+ * Module Reminders
+ * 
+ * @author Anthony 'IBurn36360' Diaz
+ * @final
+ * @name Module Reminders
+ * @version 1.0.10
+ * 
+ * Handles recurring messages or commands (Events that happen on a timer)
+ */
+final class reminders
 {
     // Module vars
     protected $version = '1.0.10';

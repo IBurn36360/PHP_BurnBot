@@ -1,11 +1,20 @@
 <?php
-// Was this accessed directly?  If so, exit.
 if (!defined('IN_PHPBURNBOT'))
 {
 	exit;
 }
 
-class irc
+/**
+ * IRC interaction library
+ * 
+ * @author Anthony 'IBurn36360' Diaz
+ * @final
+ * @name irc
+ * @version 1.0.0
+ * 
+ * Handles connecting to and decyphering messages over IRC
+ */
+final class irc
 {
     protected $sock;
     protected $connected;
@@ -334,7 +343,8 @@ class irc
                     'nick'      => $parts[1],
                     'ident'     => $parts[2],
                     'hostname'  => $parts[3],
-                    'chan'      => $parts[5],
+                    'target'    => $parts[5],
+                    'chan'      => $parts[6],
                     'raw'       => $message
                 );
             } elseif (stristr($parts[4], 'part')) {

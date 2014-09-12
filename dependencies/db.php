@@ -1,10 +1,19 @@
 <?php
-// Was this accessed directly?  If so, exit.
 if (!defined('IN_PHPBURNBOT'))
 {
 	exit;
 }
 
+/**
+ * Database library
+ * 
+ * @author Anthony 'IBurn36360' Diaz
+ * @final
+ * @name db
+ * @version 1.0.0
+ * 
+ * Handles database connection and tasks
+ */
 final class db {
     protected $link;
     protected $hostname;
@@ -36,6 +45,7 @@ final class db {
 
 		$this->link->set_charset('utf8');
 		$this->link->query('SET SQL_MODE = \'\'');
+        $this->link->query('SET NAMES utf8');
     }
     
     /**
@@ -140,6 +150,16 @@ final class db {
     {
     	return $this->link->insert_id;
     }
+    
+    /**
+     * Gets the character set defined by the link
+     * 
+     * @return $charset[string] - String charset for the link
+     */
+     public function getCharset()
+     {
+        return $this->link->character_set_name();
+     }
     
     /**
      * Checks if a table exists in the current DB

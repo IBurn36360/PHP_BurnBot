@@ -5,8 +5,17 @@ if (!defined('IN_PHPBURNBOT'))
 	exit;
 }
 
-// A module designed to capture nicknames in the case where a nickserv is not protecting them.
-class nickprotect
+/**
+ * Module NickProtect
+ * 
+ * @author Anthony 'IBurn36360' Diaz
+ * @final
+ * @name Module NickProtect
+ * @version 1.0.9
+ * 
+ * Handles grabbing nicknames in the event that the user PARTs or QUITs from the channel
+ */
+final class nickprotect
 {
     // Module vars
     protected $version = '1.0.9';

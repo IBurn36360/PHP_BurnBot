@@ -9,8 +9,9 @@ if (!defined('IN_PHPBURNBOT'))
  * Module channel
  * 
  * @author Anthony 'IBurn36360' Diaz
+ * @final
  * @name Module Channel
- * @version 1.0.20
+ * @version 1.0.43
  * 
  * Handles channel added commands
  */

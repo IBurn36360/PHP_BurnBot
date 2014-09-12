@@ -4,6 +4,16 @@ if (!defined('IN_PHPBURNBOT'))
     exit;
 }
 
+/**
+ * Logger library
+ * 
+ * @author Anthony 'IBurn36360' Diaz
+ * @final
+ * @name Logger
+ * @version 1.0.0
+ * 
+ * Handles writing and formatting logs
+ */
 final class logger
 {
     protected $file;

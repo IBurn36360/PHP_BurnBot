@@ -7,9 +7,10 @@ if (isset($_SERVER['GATEWAY_INTERFACE']) && ((stristr($_SERVER['GATEWAY_INTERFAC
 }
 
 // Srt our PHP environment variables
-ini_set('max_execution_time', '0'); // Set this directive so the PHP CGI does no kill the script during execution
-ini_set('memory_limit', '32M');     // Set this direcive in case the server lowers the memory cost of a script
-ini_set('ignore_user_abort', '1');  // Stops an impatient user or script from failing to start the bot.  We do validity checks anyway
+ini_set('max_execution_time', '0');  // Set this directive so the PHP CGI does no kill the script during execution
+ini_set('memory_limit', '32M');      // Set this direcive in case the server lowers the memory cost of a script
+ini_set('ignore_user_abort', '1');   // Stops an impatient user or script from failing to start the bot.  We do validity checks anyway
+ini_set('default_charset', 'UTF-8'); // Sets our default charset to UTF-8
 
 // Set a constant to define the core dir of the bot
 define('BURNBOT_CORE_PATH', realpath(__DIR__));
@@ -47,9 +48,11 @@ flush();
 // Start our logger and error handler here
 require(BURNBOT_CORE_PATH . '/dependencies/logger.php');
 $file = BURNBOT_CORE_PATH . "/logs/$host/$chan/" . date('m-d-y_H-i-s') . '.php';
+
+// Check to see if our logging dir exists.  Create it recursively if not.
 if (!is_dir(BURNBOT_CORE_PATH . "/logs/$host/$chan/"))
 {
-    mkdir(BURNBOT_CORE_PATH . "/logs/$host/$chan/", 755);
+    mkdir(BURNBOT_CORE_PATH . "/logs/$host/$chan/", 0755, true);
 }
 $logger = new logger($file);
 

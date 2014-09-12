@@ -5,8 +5,17 @@ if (!defined('IN_PHPBURNBOT'))
 	exit;
 }
 
-// A fun module requested by a user to scare people on webclients.  Would only run if enabled, so is disabled by default.
-class izl
+/**
+ * Module Izl
+ * 
+ * @author Anthony 'IBurn36360' Diaz
+ * @final
+ * @name Module Izl
+ * @version 1.0.0
+ * 
+ * Custom module for irc://irc.quakenet.org/#izlsnizzt
+ */
+final class izl
 {
     // Module vars
     protected $version = '1.0.0';

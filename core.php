@@ -11,7 +11,10 @@ if (!defined('IN_PHPBURNBOT'))
  * This class contains all logic and handling for all functions of the bot, including managing the peer connection,
  * decyphering data and processing requests from both the channel and modules.
  * 
- * THIS IS A FINAL CLASS AND CAN NOT BE EXTENDED
+ * @author Anthony 'IBurn36360' Diaz
+ * @final
+ * @name Core
+ * @version 2.0.193
  */
 final class burnbot
 {
@@ -46,16 +49,18 @@ final class burnbot
     protected $loggingLevel         = 504;
     
     // Changing bools
-    protected $reconnect          = true;
-    protected $hasAuthd           = false;
-    protected $hasJoined          = false;
-    protected $getLastSocketError = true;
+    protected $reconnect            = true;
+    protected $hasAuthd             = false;
+    protected $hasJoined            = false;
+    protected $preJoinCommandsSent  = false;
+    protected $postJoinCommandsSent = false;
+    protected $getLastSocketError   = true;
     
     // Records
     protected $commandDelimeter      = '!';
     protected $overrideKey           = '';
-    protected $topic                 = 'Topic message was not send on JOIN';
-    protected $build                 = 185;
+    protected $topic                 = 'Topic message was not sent on JOIN';
+    protected $build                 = 193;
     protected $lastSendTime          = 0;
     protected $tickStartTime         = 0;
     protected $tickCurrentTime       = 0;
@@ -280,8 +285,8 @@ final class burnbot
         $this->chanName = trim($this->chan, '#');
         $this->nick     = $nick;
         $this->pass     = $pass;
-        $this->preJoin  = explode(',', $preJoin);
-        $this->postJoin = explode(',', $postJoin);
+        $this->preJoin  = $this->parseJoinCommands(explode(',', $preJoin));
+        $this->postJoin = $this->parseJoinCommands(explode(',', $postJoin));
         $this->readOnly = $readOnly;
         
         // Init the modules objet as well
@@ -448,6 +453,47 @@ final class burnbot
                 }
             }
         }
+    }
+    
+    /**
+     * Parses the pre and post-join commands to make formatted RAW commands and supply data for the commands
+     * 
+     * @param $commands[array] - Unkeyed array of all commands to be parsed
+     * 
+     * @return $parsed[aryay] - Unkeyed array of parsed commands
+     */
+     
+    protected function parseJoinCommands($commands = array())
+    {
+        if (is_array($commands) & !empty($commands))
+        {
+            $parsed = array();
+            
+            foreach ($commands as $command)
+            {
+                if ($command[0] == '/')
+                {
+                    if (stristr($command, '/msg '))
+                    {
+                        $parsed[] = 'PRIVMSG ' . str_replace('_CHAN_', $this->chan . ' :', trim($command, '/msg '));
+                        continue;
+                    }
+                    
+                    if (stristr($command, '/mode '))
+                    {
+                        $parsed[] = 'MODE _NICK_ ' . str_replace('_CHAN_', $this->chan, trim($command, '/mode '));
+                        continue;
+                    }
+                }
+                
+                // The command is a RAW, do not parse it
+                $parsed[] = $command;
+            }
+            
+            return $parsed;
+        }
+        
+        return array();
     }
     
     // Accessors
@@ -694,6 +740,66 @@ final class burnbot
         return false;
     }
     
+    /**
+     * Checks to see if a user is in the operator layer
+     * 
+     * @param $users[araay] - Array usernames to check for
+     * 
+     * @return [array] - Users that are operators
+     */
+    public function userIsOperator($users = array())
+    {
+        return array_intersect($user, $this->operators);
+    }
+    
+    /**
+     * Checks to see if a user is in the regular layer
+     * 
+     * @param $users[araay] - Array usernames to check for
+     * 
+     * @return [array] - Users that are regulars
+     */
+    public function userIsRegular($users = array())
+    {
+        return array_intersect($users, $this->regulars);
+    }
+    
+    /**
+     * Checks to see if a user is in user layer 1
+     * 
+     * @param $users[araay] - Array usernames to check for
+     * 
+     * @return [array] - Users that are in user layer 1
+     */
+    public function userIsuserLayer1($users = array())
+    {
+        return array_intersect($users, $this->userLayer1);
+    }
+    
+    /**
+     * Checks to see if a user is in user layer 2
+     * 
+     * @param $users[araay] - Array usernames to check for
+     * 
+     * @return [array] - Users that are in user layer 2
+     */
+    public function userIsUserLayer2($users = array())
+    {
+        return array_intersect($user, $this->userLayer2);
+    }
+    
+    /**
+     * Checks to see if a user is in the userlist
+     * 
+     * @param $users[araay] - Array usernames to check for
+     * 
+     * @return [array] - Users that are in the userlist
+     */
+    public function userIsuser($users = array())
+    {
+        return array_intersect($user, $this->userlist);
+    }
+    
     // Helpers
     /**
      * Implodes an associative array into a string, maintaining the key and value
@@ -711,7 +817,13 @@ final class burnbot
         {
             foreach ($arr as $k => $v)
             {
-                $str .= (is_array($v) || is_object($v)) ? "$k=>" . gettype($v) . $glue : "$k=>$v, ";
+                if (is_array($v))
+                {
+                    $str .= '[' . $this->smartImplode($glue, $v) . ']';
+                } else {
+                    $str .= "$k=>$v" . $glue;
+                }
+                
             }
             
             $str = rtrim($str, $glue);
@@ -948,19 +1060,39 @@ final class burnbot
      */
     protected function join()
     {
-        if ($this->preJoin)
+        // Stop secondary attempts to JOIN the channel from sending command again
+        if (!empty($this->preJoin) && !$this->preJoinCommandsSent)
         {
             foreach ($this->preJoin as $command)
             {
-                $this->irc->write($command);
+                $this->irc->write(str_replace('_NICK_', $this->nick, $command));
                 $this->logger("Sending message to peer: [$command]", 32, 'core');
             }
+            
+            $this->preJoinCommandsSent = true;
             
             usleep(1000000);
         }
         
         $this->logger("Joining channel $this->chan", 16, 'core');
         $this->irc->joinChannel($this->chan);
+    }
+    
+    /**
+     * Passes all post-join commands
+     */
+    protected function postJoinCommands()
+    {
+        if (!empty($this->postJoin) && !$this->postJoinCommandsSent)
+        {
+            foreach ($this->postJoin as $command)
+            {
+                $this->irc->write(str_replace('_NICK_', $this->nick, $command));
+                $this->logger("Sending message to peer: [$command]", 32, 'core');
+            }
+            
+            $this->postJoinCommandsSent = true;
+        }
     }
     
     /**
@@ -1329,6 +1461,11 @@ final class burnbot
                     }
                 }
                 
+                if (isset($messageArr['is_invite']) && ($messageArr['chan'] == $this->chan))
+                {
+                    $this->join();
+                }
+                
                 if (isset($messageArr['service_id']))
                 {
                     $this->logger($messageArr['raw'], 8, 'incoming');
@@ -1348,6 +1485,7 @@ final class burnbot
                             $this->topic = 'No topic has been set for this channel';
                             $this->logger("Topic set as: $this->topic", 32, 'core');
                             $this->hasJoined = true;
+                            $this->postJoinCommands();
                         
                             break;
                             
@@ -1355,6 +1493,7 @@ final class burnbot
                             $this->topic = $messageArr['message'];
                             $this->logger("Topic set as: $this->topic", 32, 'core');
                             $this->hasJoined = true;
+                            $this->postJoinCommands();
                         
                             break;
                             
@@ -1367,11 +1506,12 @@ final class burnbot
                         case '366':
                             $this->tickLimiter = $this->tickLimiterPostAuth;
                             $this->hasJoined = true;
+                            $this->postJoinCommands();
                             
                             break;
                             
-                        // MOTD is done, bring us back to our read/write speed
-                        case '376':
+                        case '376': // MOTD is done, bring us back to our read/write speed
+                        case '422': // MOTD file was missing.  We can JOIN here
                             $this->tickLimiter = $this->tickLimiterPostAuth;
                             $this->logger('Read/Write speed changed to post-authentication speed', 32, 'core');
                             $this->join();
@@ -1383,7 +1523,7 @@ final class burnbot
                         case '432':
                         case '433':
                         case '436':
-                            if (!$this->hasAuthd)
+                            if ($this->hasAuthd)
                             {
                                 // Feedback that the requested nick isn't available
                                 $this->addMessageToQue("Nick was rejected by server: " . $messageArr['message']);
@@ -1817,7 +1957,7 @@ final class burnbot
      */
     protected function core_ping($sender, $args = array())
     {
-        $this->addMessageToQue('Last received PING: [' . (($this->lastPingTime != 0) ? date('H:i:s T', $this->lastPingTime) : 'None received') . '].  Last received PONG: [' . (($this->lastPongTime != 0) ? date('H:i:s', $this->lastPongTime) : 'None received') . ']');
+        $this->addMessageToQue('Last received PING: [' . (($this->lastPingTime != 0) ? date('H:i:s T', $this->lastPingTime) : 'None received') . '].  Last received PONG: [' . (($this->lastPongTime != 0) ? date('H:i:s T', $this->lastPongTime) : 'None received') . ']');
     }
     
     /**
@@ -2575,7 +2715,7 @@ final class burnbot
     {
         $this->addMessageToQue($this->topic);
     }
-    
+
     /**
      * Runs the help handler or passes off to a module's help handler
      */
